@@ -69,11 +69,15 @@ def get_rms(block):
 
 # New Class: MicrophoneHandler
 class MicrophoneHandler:
+    """Handles microphone operations: device selection, stream initialization, and data reading."""
+
     def __init__(self):
+        """Initialize PyAudio and open the microphone stream."""
         self.pa = pyaudio.PyAudio()
         self.stream = self.init_microphone_stream()
 
     def select_input_device(self):
+        """Select and return the index of a preferred microphone (device containing 'mic' or 'input')."""
         for i in range(self.pa.get_device_count()):
             devinfo = self.pa.get_device_info_by_index(i)
             logging.info("Device %d: %s", i, devinfo["name"])
@@ -84,6 +88,7 @@ class MicrophoneHandler:
         return None
 
     def init_microphone_stream(self):
+        """Initialize and return the microphone stream."""
         device_index = self.select_input_device()
         return self.pa.open(
             format=FORMAT,
@@ -95,12 +100,15 @@ class MicrophoneHandler:
         )
 
     def read_block(self):
+        """Read and return a block of audio data from the stream."""
         return self.stream.read(INPUT_FRAMES_PER_BLOCK, exception_on_overflow=False)
 
     def stop(self):
+        """Stop the microphone stream."""
         self.stream.close()
 
     def reset(self):
+        """Reset the microphone stream."""
         self.stop()
         self.pa = pyaudio.PyAudio()
         self.stream = self.init_microphone_stream()
@@ -108,7 +116,15 @@ class MicrophoneHandler:
 
 # New Class: NotificationManager
 class NotificationManager:
+    """Manages notifications and audio recording for the Babyphone application."""
+
     def __init__(self, mic_handler: MicrophoneHandler):
+        """
+        Initialize the NotificationManager with a microphone handler.
+
+        Args:
+            mic_handler (MicrophoneHandler): Instance for accessing the audio stream.
+        """
         self.speaking = True
         self.send_noise_level_timestamp = datetime.now()
         self.mic_handler = mic_handler
@@ -116,11 +132,19 @@ class NotificationManager:
     @sleep_and_retry
     @limits(calls=1, period=1)
     def send_post_request(self, url, payload):
+        """
+        Send a POST request to the specified URL with the given payload.
+
+        Args:
+            url (str): The endpoint URL.
+            payload (dict): The JSON payload data.
+        """
         response = session.post(url, json=payload)
         response.raise_for_status()
         logging.debug("Response status (%s): %s", url, response.status_code)
 
     def record_audio_clip(self):
+        """Record a 3-second audio clip and save it as an MP3 file."""
         # Use mic_handler's stream for recording
         _, _, free = shutil.disk_usage("/")
         if free < 8 * 1024**3:
@@ -152,6 +176,13 @@ class NotificationManager:
         os.remove(wav_path)
 
     def notify_noise_level(self, amplitudes, threshold):
+        """
+        Notify the current noise level if enough data is available and time elapsed.
+
+        Args:
+            amplitudes (deque): Recent amplitude measurements.
+            threshold (float): Current computed noise threshold.
+        """
         DURATION_WINDOW = 1.0  # seconds
         required_length = int(DURATION_WINDOW / INPUT_BLOCK_TIME)
         if len(amplitudes) < required_length:
@@ -167,6 +198,13 @@ class NotificationManager:
             self.send_noise_level_timestamp = datetime.now()
 
     def notify_speaking_event(self, speaking: bool, message: str = ""):
+        """
+        Notify a speaking event when the speaking state changes.
+
+        Args:
+            speaking (bool): The updated speaking state.
+            message (str, optional): An optional message.
+        """
         if speaking != self.speaking:
             self.speaking = speaking
             payload = {
@@ -182,7 +220,15 @@ class NotificationManager:
 
 # New Class: AudioProcessor
 class AudioProcessor:
+    """Processes audio amplitude data and handles noise-event logic."""
+
     def __init__(self, notifier: NotificationManager):
+        """
+        Initialize the AudioProcessor.
+
+        Args:
+            notifier (NotificationManager): Instance for notifying events.
+        """
         self.threshold = INITIAL_THRESHOLD
         self.noisycount = 0
         self.noise_event = 0
@@ -191,6 +237,12 @@ class AudioProcessor:
         self.notifier = notifier
 
     def process(self, amplitude: float):
+        """
+        Process an audio amplitude value: update history, compute threshold, and notify.
+
+        Args:
+            amplitude (float): The current amplitude of audio input.
+        """
         self.amplitudes.append(amplitude)
         self.threshold = median(self.amplitudes) + 0.05
         self.notifier.notify_noise_level(self.amplitudes, self.threshold)
@@ -226,13 +278,17 @@ class AudioProcessor:
 
 # Updated composite class: AudioMonitor
 class AudioMonitor:
+    """Integrates microphone handling, audio processing, and notifications."""
+
     def __init__(self):
+        """Initialize AudioMonitor and notify initial state."""
         self.mic_handler = MicrophoneHandler()
         self.notifier = NotificationManager(self.mic_handler)
         self.processor = AudioProcessor(self.notifier)
         self.notifier.notify_speaking_event(False, message="Starting")
 
     def monitor_audio(self):
+        """Read an audio block, compute its RMS, and process it."""
         try:
             block = self.mic_handler.read_block()
         except IOError as e:
@@ -242,9 +298,11 @@ class AudioMonitor:
         self.processor.process(amplitude)
 
     def stop(self):
+        """Stop audio monitoring."""
         self.mic_handler.stop()
 
     def reset(self):
+        """Reset audio monitoring."""
         self.mic_handler.reset()
 
 
