@@ -1,0 +1,1 @@
+"""Babyphone package for baby monitoring using audio analysis."""
