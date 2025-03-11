@@ -1,0 +1,8 @@
+{
+    "LOCAL_WEBHOOK_URL": "http://localhost:8000/webhook",
+    "LOCAL_NOISE_WEBHOOK_URL": "http://localhost:8000/noise",
+    "INITIAL_THRESHOLD": 0.02,
+    "CHANNELS": 1,
+    "RATE": 44100,
+    "INPUT_BLOCK_TIME": 0.05
+}
