@@ -16,21 +16,21 @@ adapter = HTTPAdapter(pool_connections=1, pool_maxsize=10, max_retries=retries)
 session.mount("http://", adapter)
 session.mount("https://", adapter)
 
-class NotificationManager:
-    """Manages notifications and audio recording for the Babyphone application."""
+from typing import Dict, Any, Deque
 
-    def __init__(self, mic_handler, webhook_url, noise_webhook_url, input_block_time):
-        """Initialize the NotificationManager with a microphone handler."""
-        self.speaking = True
-        self.send_noise_level_timestamp = datetime.now()
-        self.mic_handler = mic_handler
-        self.webhook_url = webhook_url
-        self.noise_webhook_url = noise_webhook_url
-        self.input_block_time = input_block_time
+class NotificationManager:
+    def __init__(self, mic_handler: 'MicrophoneHandler', webhook_url: str, 
+                 noise_webhook_url: str, input_block_time: float) -> None:
+        self.speaking: bool = True
+        self.send_noise_level_timestamp: datetime = datetime.now()
+        self.mic_handler: 'MicrophoneHandler' = mic_handler
+        self.webhook_url: str = webhook_url
+        self.noise_webhook_url: str = noise_webhook_url
+        self.input_block_time: float = input_block_time
 
     @sleep_and_retry
     @limits(calls=1, period=1)
-    def send_post_request(self, url, payload):
+    def send_post_request(self, url: str, payload: Dict[str, Any]) -> None:
         """Send a POST request to the specified URL with the given payload."""
         response = session.post(url, json=payload)
         response.raise_for_status()
@@ -40,7 +40,7 @@ class NotificationManager:
         """Record a 3-second audio clip and save it as an MP3 file."""
         # ... rest of the method remains the same ...
 
-    def notify_noise_level(self, amplitudes, threshold):
+    def notify_noise_level(self, amplitudes: Deque[float], threshold: float) -> None:
         """Notify the current noise level if enough data is available and time elapsed."""
         DURATION_WINDOW = 1.0
         required_length = int(DURATION_WINDOW / self.input_block_time)
@@ -56,7 +56,7 @@ class NotificationManager:
             logging.debug("%s %s", datetime.now().isoformat(), payload)
             self.send_noise_level_timestamp = datetime.now()
 
-    def notify_speaking_event(self, speaking: bool, message: str = ""):
+    def notify_speaking_event(self, speaking: bool, message: str = "") -> None:
         """Notify a speaking event when the speaking state changes."""
         if speaking != self.speaking:
             self.speaking = speaking

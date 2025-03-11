@@ -16,7 +16,7 @@ logging.basicConfig(
     format="%(asctime)s:%(levelname)s:%(message)s",
 )
 
-def load_config(config_path="config.json"):
+def load_config(config_path: str = "config.json") -> Dict[str, Any]:
     """Load configuration from a JSON file."""
     try:
         with open(config_path, "r") as config_file:
@@ -48,7 +48,7 @@ def load_config(config_path="config.json"):
         logging.error(str(e))
         raise
 
-def main():
+def main() -> None:
     config = load_config()
     monitor = AudioMonitor(config)
     try:

@@ -4,12 +4,14 @@ from .notifications import NotificationManager
 from .processor import AudioProcessor
 from .utils import get_rms
 
+from typing import Dict, Any
+
 class AudioMonitor:
     """Integrates microphone handling, audio processing, and notifications."""
 
-    def __init__(self, config):
+    def __init__(self, config: Dict[str, Any]) -> None:
         """Initialize AudioMonitor and notify initial state."""
-        self.config = config
+        self.config: Dict[str, Any] = config
         self.mic_handler = MicrophoneHandler(
             format=config["FORMAT"],
             channels=config["CHANNELS"],
@@ -29,7 +31,7 @@ class AudioMonitor:
         )
         self.notifier.notify_speaking_event(False, message="Starting")
 
-    def monitor_audio(self):
+    def monitor_audio(self) -> None:
         """Read an audio block, compute its RMS, and process it."""
         try:
             block = self.mic_handler.read_block()
@@ -39,10 +41,10 @@ class AudioMonitor:
         amplitude = get_rms(block)
         self.processor.process(amplitude)
 
-    def stop(self):
+    def stop(self) -> None:
         """Stop audio monitoring."""
         self.mic_handler.stop()
 
-    def reset(self):
+    def reset(self) -> None:
         """Reset audio monitoring."""
         self.mic_handler.reset()

@@ -1,21 +1,24 @@
 from collections import deque
 from datetime import datetime, timedelta
 from statistics import median
+import logging
+from typing import Deque
+from .notifications import NotificationManager
 
 class AudioProcessor:
     """Processes audio amplitude data and handles noise-event logic."""
 
-    def __init__(self, notifier, initial_threshold, input_block_time):
+    def __init__(self, notifier: NotificationManager, initial_threshold: float, input_block_time: float) -> None:
         """Initialize the AudioProcessor."""
-        self.threshold = initial_threshold
-        self.noisycount = 0
-        self.noise_event = 0
-        self.last_events_time = datetime(1900, 1, 1)
-        self.amplitudes = deque(maxlen=int(120 / input_block_time))
-        self.notifier = notifier
-        self.input_block_time = input_block_time
+        self.threshold: float = initial_threshold
+        self.noisycount: int = 0
+        self.noise_event: int = 0
+        self.last_events_time: datetime = datetime(1900, 1, 1)
+        self.amplitudes: Deque[float] = deque(maxlen=int(120 / input_block_time))
+        self.notifier: NotificationManager = notifier
+        self.input_block_time: float = input_block_time
 
-    def process(self, amplitude: float):
+    def process(self, amplitude: float) -> None:
         """
         Process an audio amplitude value: update history, compute threshold, and notify.
 
