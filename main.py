@@ -13,6 +13,7 @@ import requests
 
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
+from secrets import URL, NOISE_URL
 
 # Create a Session
 session = requests.Session()
@@ -31,12 +32,6 @@ logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s:%(levelname)s:%(message)s",
 )
-
-URL = "https://ha.tiarkaerell.com/api/webhook/create-event-on-webhook-babyphone-81msbShN2-7pcRq_WCHZICRN"
-NOISE_URL = "https://ha.tiarkaerell.com/api/webhook/noise-babyphone-81msbShN2-7pcRq_WCHZICRN"
-
-URL = "http://192.168.1.10/api/webhook/create-event-on-webhook-babyphone-81msbShN2-7pcRq_WCHZICRN"
-NOISE_URL = "http://192.168.1.10/api/webhook/noise-babyphone-81msbShN2-7pcRq_WCHZICRN"
 
 INITIAL_THRESHOLD = 0.09
 FORMAT = pyaudio.paInt16
