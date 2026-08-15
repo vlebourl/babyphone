@@ -8,6 +8,7 @@ authors = [{ name = "Vincent Le Bourlot" }]
 # La cible d'exécution est un Raspberry Pi 3A+ sous Bookworm (Python 3.11) — voir docs/adr/0005
 requires-python = ">=3.11"
 dependencies = [
+    "numpy>=1.24",
     "pyaudio>=0.2.14",
     "ratelimit>=2.2.1",
     "requests>=2.32.3",
