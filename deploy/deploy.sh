@@ -93,27 +93,10 @@ deploy_ha() {
     ssh -p "$HA_PORT" "$HA_HOST" bash -s <<REMOTE
 set -euo pipefail
 ha core check >/dev/null && echo "  ✓ configuration valide"
-# Lovelace vit dans le stockage interne : sauvegarde avant réécriture
-cp /config/.storage/lovelace.lovelace_mobile \
-   /config/.storage/lovelace.lovelace_mobile.bak-deploy 2>/dev/null || true
-set +e
 python3 /tmp/lovelace_babyphone_view.py
-LOVELACE_CHANGED=\$?
-set -e
 curl -sf -X POST -H "Authorization: Bearer \$SUPERVISOR_TOKEN" \
     http://supervisor/core/api/services/homeassistant/reload_all >/dev/null \
     && echo "  ✓ rechargé (entités et automatisations)"
-# Lovelace, lui, n'est relu qu'au démarrage : redémarrage seulement si besoin
-if [ "\$LOVELACE_CHANGED" = "10" ]; then
-    echo "  la vue a changé → redémarrage de Home Assistant (~1 min)"
-    ha core restart >/dev/null 2>&1
-    for i in \$(seq 1 30); do
-        curl -sf -H "Authorization: Bearer \$SUPERVISOR_TOKEN" \
-            http://supervisor/core/api/ >/dev/null 2>&1 && break
-        sleep 8
-    done
-    echo "  ✓ Home Assistant redémarré, la vue est en ligne"
-fi
 REMOTE
 }
 

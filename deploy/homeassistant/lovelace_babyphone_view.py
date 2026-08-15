@@ -6,14 +6,30 @@ passe maintenant, la nuit écoulée, les tendances, la santé du dispositif,
 puis la télémétrie brute. Un parent s'arrête après la troisième ; on
 descend jusqu'aux deux dernières quand quelque chose cloche.
 
-Lovelace vit dans le stockage interne de Home Assistant, pas en YAML : ce
-script écrit la vue de façon idempotente et remplace l'existante.
+Lovelace vit dans le stockage interne de Home Assistant, pas en YAML. La
+vue est publiée par l'**API websocket** `lovelace/save_config` — la même
+que l'interface utilise quand on édite une carte. Écrire directement dans
+`.storage` ne marche pas : Home Assistant charge les tableaux de bord en
+mémoire au démarrage, ne relit jamais le fichier ensuite, et finit par
+l'écraser. Passer par l'API met à jour la mémoire ET le disque, sans
+redémarrage.
+
+Client websocket écrit sur la bibliothèque standard : le conteneur SSH de
+Home Assistant n'a ni `websockets` ni `aiohttp`, et on n'installe rien
+chez l'hôte pour un script de déploiement.
+
 Déployé et exécuté par deploy/deploy.sh.
 """
 
+import base64
+import hashlib
 import json
+import os
+import socket
+import struct
 
-PATH = "/config/.storage/lovelace.lovelace_mobile"
+WS_HOST, WS_PORT, WS_PATH = "supervisor", 80, "/core/websocket"
+DASHBOARD = "lovelace-mobile"
 
 # Palette : un bleu calme pour le signal, un ambre pour le seuil, un rouge
 # réservé aux seules situations qui demandent une action.
@@ -397,20 +413,85 @@ VUE = {
 }
 
 
-def main():
-    """Écrit la vue. Rend 10 si le fichier a changé, 0 sinon.
+class Websocket:
+    """Client websocket minimal, suffisant pour dialoguer avec Home Assistant."""
 
-    Ce code de sortie compte : Home Assistant charge les tableaux de bord
-    Lovelace en mémoire au démarrage et ne relit jamais `.storage` ensuite
-    — `reload_all` ne les recharge pas non plus. Une écriture sur disque
-    reste donc invisible, et HA écrase même le fichier à sa prochaine
-    sauvegarde. Seul un redémarrage rend la vue effective, et le
-    déploiement s'en sert pour ne redémarrer QUE lorsque c'est nécessaire.
-    """
-    with open(PATH) as f:
-        data = json.load(f)
-    avant_json = json.dumps(data, sort_keys=True)
-    views = data["data"]["config"]["views"]
+    def __init__(self, host, port, path):
+        self.sock = socket.create_connection((host, port), timeout=30)
+        key = base64.b64encode(os.urandom(16)).decode()
+        self.sock.sendall(
+            f"GET {path} HTTP/1.1\r\nHost: {host}\r\nUpgrade: websocket\r\n"
+            f"Connection: Upgrade\r\nSec-WebSocket-Key: {key}\r\n"
+            f"Sec-WebSocket-Version: 13\r\n\r\n".encode()
+        )
+        expected = base64.b64encode(
+            hashlib.sha1((key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11").encode()).digest()
+        ).decode()
+        head = b""
+        while b"\r\n\r\n" not in head:
+            head += self.sock.recv(1)
+        assert expected in head.decode(errors="ignore"), "poignée de main websocket refusée"
+        self._buf = b""
+
+    def _recv_exact(self, n):
+        while len(self._buf) < n:
+            chunk = self.sock.recv(65536)
+            if not chunk:
+                raise ConnectionError("connexion fermée")
+            self._buf += chunk
+        out, self._buf = self._buf[:n], self._buf[n:]
+        return out
+
+    def send(self, obj):
+        data = json.dumps(obj).encode()
+        header = bytearray([0x81])  # FIN + texte
+        n = len(data)
+        mask_bit = 0x80  # tout message client DOIT être masqué
+        if n < 126:
+            header.append(mask_bit | n)
+        elif n < 65536:
+            header.append(mask_bit | 126)
+            header += struct.pack(">H", n)
+        else:
+            header.append(mask_bit | 127)
+            header += struct.pack(">Q", n)
+        mask = os.urandom(4)
+        header += mask
+        self.sock.sendall(bytes(header) + bytes(b ^ mask[i % 4] for i, b in enumerate(data)))
+
+    def recv(self):
+        payload = b""
+        while True:
+            b0, b1 = self._recv_exact(2)
+            n = b1 & 0x7F
+            if n == 126:
+                n = struct.unpack(">H", self._recv_exact(2))[0]
+            elif n == 127:
+                n = struct.unpack(">Q", self._recv_exact(8))[0]
+            payload += self._recv_exact(n)
+            if b0 & 0x80:  # FIN
+                return json.loads(payload)
+
+    def close(self):
+        try:
+            self.sock.close()
+        except OSError:
+            pass
+
+
+def main():
+    """Publie la vue par l'API, sans toucher au disque ni redémarrer HA."""
+    ws = Websocket(WS_HOST, WS_PORT, WS_PATH)
+    ws.recv()  # auth_required
+    ws.send({"type": "auth", "access_token": os.environ["SUPERVISOR_TOKEN"]})
+    if ws.recv().get("type") != "auth_ok":
+        raise SystemExit("  authentification websocket refusée")
+
+    ws.send({"id": 1, "type": "lovelace/config", "url_path": DASHBOARD})
+    r = ws.recv()
+    assert r.get("success"), r
+    config = r["result"]
+    views = config["views"]
 
     # la sous-vue système a été fusionnée : on la retire si elle traîne encore
     avant = len(views)
@@ -429,13 +510,14 @@ def main():
         views.insert(idx + 1, VUE)
         print(f"  vue « babyphone » insérée (position {idx + 1})")
 
-    if json.dumps(data, sort_keys=True) == avant_json:
-        print("  vue déjà à jour, aucun redémarrage nécessaire")
-        return 0
-
-    with open(PATH, "w") as f:
-        json.dump(data, f, indent=2, ensure_ascii=False)
-    return 10
+    ws.send({"id": 2, "type": "lovelace/save_config",
+             "url_path": DASHBOARD, "config": config})
+    r = ws.recv()
+    ws.close()
+    if not r.get("success"):
+        raise SystemExit(f"  échec de la publication : {r}")
+    print("  vue publiée par l'API (prise en compte immédiate, sans redémarrage)")
+    return 0
 
 
 if __name__ == "__main__":
