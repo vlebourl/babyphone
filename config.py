@@ -24,12 +24,20 @@ MIN_NOISE_DURATION = 0.11  # minimum noise duration to trigger an event
 NOISE_EVENT_COUNT = 3  # number of noise events before considering speaking
 NOISE_EVENT_TIMEOUT = 1.5  # seconds between noise events
 
-# Load secrets if available
+# Load local settings if available
 try:
-    from secrets import NOISE_URL, URL
-
-    logging.info("Loaded API endpoints from secrets.py")
+    from local_settings import NOISE_URL, URL
 except ImportError:
-    logging.warning("secrets.py not found, using default API endpoints")
-    URL = DEFAULT_URL
-    NOISE_URL = DEFAULT_NOISE_URL
+    try:
+        # Compat : ancien nom du fichier, qui masquait le module standard
+        # `secrets` — à renommer en local_settings.py sur le déploiement
+        from secrets import NOISE_URL, URL  # type: ignore[attr-defined]
+
+        logging.warning(
+            "secrets.py est déprécié (il masque le module standard `secrets`) : "
+            "renommez-le en local_settings.py"
+        )
+    except ImportError:
+        logging.warning("local_settings.py not found, using default API endpoints")
+        URL = DEFAULT_URL
+        NOISE_URL = DEFAULT_NOISE_URL

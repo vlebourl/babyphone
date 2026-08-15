@@ -84,6 +84,14 @@ class Detection:
 
     def feed(self, amplitude: float, now: datetime) -> Output:
         s = self._s
+        # Le Pi n'a pas d'horloge RTC : au premier accrochage NTP après le boot,
+        # l'heure peut reculer. Des repères dans le futur rendraient la détection
+        # sourde (écarts négatifs) jusqu'à ce que l'heure les rattrape — on recale.
+        if now < self._last_event_at:
+            self._last_event_at = now
+        if self._last_report_at is not None and now < self._last_report_at:
+            self._last_report_at = now
+
         self._amplitudes.append(amplitude)
         self._threshold = median(self._amplitudes) + s.threshold_offset
 

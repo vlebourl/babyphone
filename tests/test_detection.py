@@ -139,6 +139,18 @@ def test_le_meme_cri_reveille_quel_que_soit_le_fond():
     assert [t.awake for t in sc.transitions] == [True]
 
 
+# --- Robustesse : horloge sans RTC (le Pi recale l'heure via NTP après le boot) ---
+
+
+def test_un_recul_d_horloge_ne_rend_pas_la_detection_sourde():
+    # Sans recalage, un repère resté dans le futur donne des écarts négatifs :
+    # plus aucun éveil possible tant que l'heure n'a pas rattrapé le repère.
+    sc = Scenario().play(quiet(10) + bang())  # un événement enregistré
+    sc.now -= timedelta(hours=1)  # NTP recale l'heure en arrière
+    sc.play(quiet(10) + (bang() + quiet(5)) * 4)
+    assert [t.awake for t in sc.transitions] == [True]
+
+
 # --- Télémétrie : le niveau sonore, cadencé et moyenné ---
 
 

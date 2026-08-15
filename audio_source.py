@@ -10,6 +10,7 @@ L'interface est `readings()` ; en test, n'importe quel itérable de
 import logging
 import math
 import struct
+import time
 from datetime import datetime
 from typing import Iterator
 
@@ -26,6 +27,8 @@ MAX_READ_ERRORS = 5  # au-delà, on réinitialise complètement la pile audio
 def get_rms(block: bytes) -> float:
     """Calculate the Root Mean Square of the audio block."""
     count = len(block) / 2
+    if count == 0:
+        return 0.0  # lecture vide (flux en cours de coupure) : silence, pas de crash
     formatting = "%dh" % (count)
     shorts = struct.unpack(formatting, block)
 
@@ -60,6 +63,9 @@ class MicrophoneSource:
                     self._reset()
                     self._error_count = 0
                 continue
+            # lecture réussie : le seuil de reset compte des erreurs CONSÉCUTIVES,
+            # pas un cumul sur toute la vie du processus
+            self._error_count = 0
             yield datetime.now(), get_rms(block)
 
     def close(self):
@@ -70,9 +76,26 @@ class MicrophoneSource:
             self._pa.terminate()
 
     def _reset(self):
+        """Réinitialise la pile audio, avec retries : un micro USB en sous-tension
+        peut disparaître quelques secondes — crasher ici laisserait la chambre
+        sans surveillance, on insiste jusqu'à son retour."""
         self.close()
-        self._pa = pyaudio.PyAudio()
-        self._stream = self._open_mic_stream()
+        delay = 1
+        while True:
+            try:
+                self._pa = pyaudio.PyAudio()
+                self._stream = self._open_mic_stream()
+                return
+            except Exception:
+                logging.exception(
+                    "Failed to reopen audio stream; retrying in %ds", delay
+                )
+                try:
+                    self._pa.terminate()
+                except Exception:
+                    pass
+                time.sleep(delay)
+                delay = min(delay * 2, 30)
 
     def _find_input_device(self):
         """Heuristique ALSA/Pi : premier périphérique nommé « mic » ou « input »."""
