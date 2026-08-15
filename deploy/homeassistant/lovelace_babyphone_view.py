@@ -510,7 +510,7 @@ def main():
         views.insert(idx + 1, VUE)
         print(f"  vue « babyphone » insérée (position {idx + 1})")
 
-    ws.send({"id": 2, "type": "lovelace/save_config",
+    ws.send({"id": 2, "type": "lovelace/config/save",
              "url_path": DASHBOARD, "config": config})
     r = ws.recv()
     ws.close()
