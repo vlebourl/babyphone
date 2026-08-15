@@ -1,4 +1,10 @@
+---
+status: deprecated
+---
+
 # Clips conservés localement, purgés par pression sur l'espace disque
+
+> **Caduque (août 2026)** : la mécanique de clips a été retirée. Elle n'était pas utilisée, et il s'est avéré qu'elle n'avait jamais fonctionné — les frames PCM étaient écrites sans header RIFF, la conversion MP3 échouait systématiquement, et chaque éveil laissait un `.wav` orphelin illisible sur la microSD (à nettoyer sur le Pi : `rm ~/babyphone/clips/*.wav`). Le principe « l'audio ne quitte jamais l'appareil » reste, lui, en vigueur ([ADR-0003](0003-webhooks-domotique-sans-flux-audio.md)).
 
 À chaque entrée en éveil, un court clip audio est enregistré et conservé **sur la machine uniquement**, en MP3 horodaté. Il répond à une question que la télémétrie ne peut pas trancher : « c'était quoi, ce bruit à 2h ? ». Cohérent avec [ADR-0003](0003-webhooks-domotique-sans-flux-audio.md), l'audio ne quitte jamais l'appareil ; on l'écoute en s'y connectant.
 

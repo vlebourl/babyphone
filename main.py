@@ -1,7 +1,5 @@
 import logging
 import math
-import os
-import shutil
 import struct
 from collections import deque
 from datetime import datetime, timedelta
@@ -9,13 +7,12 @@ from statistics import mean, median
 
 import pyaudio
 import requests
-from pydub import AudioSegment
 from ratelimit import limits, sleep_and_retry
 from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 # Import configuration from a separate file
-from config import (CHANNELS, CLIPS_DIR, FORMAT, INITIAL_THRESHOLD,
+from config import (CHANNELS, FORMAT, INITIAL_THRESHOLD,
                     INPUT_BLOCK_TIME, MIN_NOISE_DURATION, NOISE_EVENT_COUNT,
                     NOISE_EVENT_TIMEOUT, NOISE_THRESHOLD_ADJUSTMENT, NOISE_URL,
                     RATE, SHORT_NORMALIZE, SPEAKING_TIMEOUT, URL)
@@ -58,67 +55,6 @@ def get_rms(block):
     return math.sqrt(sum_squares / count)
 
 
-class AudioRecorder:
-    """Handles audio recording and clip management."""
-
-    def __init__(self, stream, clips_dir=CLIPS_DIR):
-        self.stream = stream
-        self.clips_dir = os.path.expanduser(clips_dir)
-        os.makedirs(self.clips_dir, exist_ok=True)
-
-    def record_clip(self, duration=3):
-        """Record an audio clip of specified duration in seconds."""
-        self._ensure_disk_space()
-
-        audio_frames = []
-        start_time = datetime.now()
-        while (datetime.now() - start_time).total_seconds() < duration:
-            try:
-                block = self.stream.read(
-                    INPUT_FRAMES_PER_BLOCK, exception_on_overflow=False
-                )
-                audio_frames.append(block)
-            except IOError as e:
-                logging.error("Error recording audio clip: %s", e)
-                break
-
-        if audio_frames:
-            self._save_clip(audio_frames)
-
-    def _ensure_disk_space(self, min_space_gb=8):
-        """Ensure there's enough disk space, removing old clips if necessary."""
-        _, _, free = shutil.disk_usage("/")
-        # Check if free space is less than min_space_gb
-        if free < min_space_gb * 1024**3:
-            clips = [f for f in os.listdir(self.clips_dir) if f.endswith(".mp3")]
-            clips.sort()  # oldest will be first
-            if clips:
-                # Remove the oldest clip
-                os.remove(os.path.join(self.clips_dir, clips[0]))
-                logging.info(f"Removed old clip {clips[0]} to free space")
-
-    def _save_clip(self, audio_frames):
-        """Save recorded audio frames as an MP3 file."""
-        timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
-        wav_path = os.path.join(self.clips_dir, f"{timestamp}.wav")
-        mp3_path = os.path.join(self.clips_dir, f"{timestamp}.mp3")
-
-        try:
-            # Save as WAV first
-            with open(wav_path, "wb") as wf:
-                wf.write(b"".join(audio_frames))
-
-            # Convert to MP3
-            sound = AudioSegment.from_wav(wav_path)
-            sound.export(mp3_path, format="mp3")
-
-            # Delete the WAV file
-            os.remove(wav_path)
-            logging.info(f"Saved audio clip to {mp3_path}")
-        except Exception as e:
-            logging.error(f"Error saving audio clip: {e}")
-
-
 class ApiClient:
     """Handles API communication."""
 
@@ -155,7 +91,6 @@ class TapTester:
         self.send_noise_level_timestamp = datetime.now()
 
         self.api_client = ApiClient(session)
-        self.recorder = AudioRecorder(self.stream)
 
         self.send_speaking(False, message="Starting")
         logging.info("Initialized TapTester")
@@ -265,9 +200,6 @@ class TapTester:
 
             self.api_client.post(URL, json_data)
             logging.info(f"{datetime.now().isoformat()} {json_data}")
-
-        if speaking:
-            self.recorder.record_clip()
 
     def process_amplitude(self, amplitude: float) -> None:
         """Process the current amplitude value."""

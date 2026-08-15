@@ -15,9 +15,6 @@ CHANNELS = 1
 RATE = 48000  # Sample rate
 INPUT_BLOCK_TIME = 0.05  # Time in seconds for each audio block
 
-# File paths
-CLIPS_DIR = "~/babyphone/clips/"
-
 # Default API endpoints (will be overridden by secrets.py if available)
 DEFAULT_URL = "http://localhost/api/webhook/babyphone"
 DEFAULT_NOISE_URL = "http://localhost/api/webhook/noise-babyphone"

@@ -46,10 +46,6 @@ _Éviter_ : silence, fin d'alerte
 La télémétrie continue envoyée à la domotique — amplitude récente et seuil courant — indépendamment de tout éveil. Sert à tracer des courbes, pas à alerter.
 _Éviter_ : métrique, monitoring
 
-**Clip** :
-Un court enregistrement audio conservé localement au moment d'un éveil, pour permettre à un parent d'écouter après coup ce qui s'est passé. Ne quitte jamais la machine (voir [ADR-0004](docs/adr/0004-clips-locaux-purge-espace-disque.md)).
-_Éviter_ : enregistrement, sample, archive
-
 **Domotique** :
 Le système maison qui reçoit les éveils et les niveaux sonores et décide quoi en faire (notifier, allumer une lampe, tracer un graphe). Le babyphone ne sait rien de ce qui se passe en aval.
 _Éviter_ : serveur, backend, Home Assistant, API
