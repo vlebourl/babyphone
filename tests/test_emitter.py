@@ -75,6 +75,32 @@ def test_les_retries_http_s_appliquent_bien_aux_post():
     assert 503 in retries.status_forcelist
 
 
+def test_le_secret_du_webhook_n_est_jamais_journalise(caplog):
+    # L'URL porte le secret d'authentification (ADR-0003) : il ne doit
+    # apparaître ni dans les journaux de succès, ni dans ceux d'échec.
+    import logging
+
+    secret = "noise-babyphone-SUPERSECRETTOKEN123"
+    url = f"http://192.168.1.10/api/webhook/{secret}"
+
+    class ExplodingSession:
+        def post(self, url, json=None, timeout=None):
+            import requests
+
+            raise requests.exceptions.ConnectionError("HA injoignable")
+
+    with caplog.at_level(logging.DEBUG):
+        WebhookEmitter(url, url, session=FakeSession()).publish(
+            Output(noise_report=NoiseReport(amplitude=0.02, threshold=0.055))
+        )
+        WebhookEmitter(url, url, session=ExplodingSession()).publish(
+            Output(noise_report=NoiseReport(amplitude=0.02, threshold=0.055))
+        )
+
+    assert secret not in caplog.text
+    assert "***" in caplog.text
+
+
 def test_un_echec_reseau_ne_remonte_pas_dans_la_boucle():
     class ExplodingSession:
         def post(self, url, json=None, timeout=None):

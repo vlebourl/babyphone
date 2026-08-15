@@ -21,6 +21,12 @@ from detection import Output
 POST_TIMEOUT = (3.05, 10)
 
 
+def _redact(url: str) -> str:
+    """Masque le secret que porte l'URL de webhook avant de la journaliser."""
+    head, sep, _ = url.partition("/api/webhook/")
+    return f"{head}{sep}***" if sep else url
+
+
 def create_session() -> requests.Session:
     session = requests.Session()
     retries = Retry(
@@ -65,7 +71,8 @@ class WebhookEmitter:
                 "noise": t.noise_duration,
                 "message": t.message,
             }
-            logging.info(f"transition d'éveil : {json_data}")
+            # rare et précieux : c'est la trace qu'on relit pour comprendre une nuit
+            logging.info("transition d'éveil : %s", json_data)
             self._post(self._url, json_data)
 
     @sleep_and_retry
@@ -74,8 +81,12 @@ class WebhookEmitter:
         try:
             response = self._session.post(url, json=json_data, timeout=POST_TIMEOUT)
             response.raise_for_status()
-            logging.info(f"Response status ({url}): {response.status_code}")
+            # DEBUG et pas INFO : un POST par seconde, soit ~86 000 lignes par
+            # jour sur une microSD (ADR-0005). Et l'URL porte le secret
+            # d'authentification du webhook (ADR-0003) : l'écrire en clair à
+            # chaque succès le recopie sans fin dans les journaux.
+            logging.debug("Response status (%s): %s", _redact(url), response.status_code)
             return response
         except requests.exceptions.RequestException as e:
-            logging.error(f"API request failed: {e}")
+            logging.error("API request failed (%s): %s", _redact(url), e)
             return None

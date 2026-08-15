@@ -37,6 +37,7 @@ check_pushed() {
 deploy_pi() {
     say "Raspberry Pi — code, dépendances, service"
     scp -q "$REPO/deploy/babyphone.service" "$PI_HOST:/tmp/babyphone.service"
+    scp -q "$REPO/deploy/journald-babyphone.conf" "$PI_HOST:/tmp/journald-babyphone.conf"
     ssh "$PI_HOST" bash -s <<'REMOTE'
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -48,6 +49,14 @@ if ! diff -q /tmp/babyphone.service /etc/systemd/system/babyphone.service >/dev/
     sudo cp /tmp/babyphone.service /etc/systemd/system/babyphone.service
     sudo systemctl daemon-reload
     echo "  unité systemd mise à jour"
+fi
+CONF=/etc/systemd/journald.conf.d/babyphone.conf
+if ! diff -q /tmp/journald-babyphone.conf "$CONF" >/dev/null 2>&1; then
+    sudo mkdir -p /etc/systemd/journald.conf.d
+    sudo cp /tmp/journald-babyphone.conf "$CONF"
+    sudo systemctl restart systemd-journald
+    sudo journalctl --vacuum-size=200M >/dev/null 2>&1 || true
+    echo "  plafond des journaux appliqué"
 fi
 sudo systemctl enable --quiet babyphone.service
 sudo systemctl restart babyphone.service
