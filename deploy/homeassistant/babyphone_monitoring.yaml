@@ -47,7 +47,7 @@ template:
         state: "{{ trigger.json.floor | float(-120) | round(1) }}"
         unit_of_measurement: "dB"
         state_class: measurement
-      - name: "Babyphone Durée de service"
+      - name: "Babyphone Duree service"
         unique_id: babyphone_duree_service
         # NE PAS renommer en *_uptime : le recorder exclut ce glob et
         # l'entité cesserait silencieusement d'être historisée.
@@ -111,6 +111,42 @@ sensor:
       hours: 24
     end: "{{ now() }}"
 
+counter:
+  babyphone_demarrages:
+    name: Babyphone démarrages
+    icon: mdi:restart-alert
+    step: 1
+
+input_boolean:
+  babyphone_alerte_acquittee:
+    name: Alerte babyphone acquittée
+    icon: mdi:check-decagram
+
+script:
+  # Un seul endroit qui sait parler à Android en critique. Le canal
+  # `alarm_stream_max` joue sur le flux ALARME : il traverse le mode
+  # silencieux et le Ne pas déranger, contrairement à une notification
+  # ordinaire. `ttl: 0` + `priority: high` empêchent la mise en sommeil
+  # de la livraison par l'optimiseur de batterie du téléphone.
+  babyphone_alerte_critique:
+    alias: Babyphone - Envoi d'une alerte critique
+    fields:
+      message: { description: Texte de l'alerte }
+      cible: { description: Service notify destinataire }
+    sequence:
+      - action: "{{ cible }}"
+        data:
+          title: "⚠️ Babyphone"
+          message: "{{ message }}"
+          data:
+            channel: alarm_stream_max
+            ttl: 0
+            priority: high
+            tag: babyphone_panne
+            actions:
+              - action: ACK_BABYPHONE
+                title: Acquitter
+
 automation:
   # Le babyphone n'émet une transition d'éveil qu'au CHANGEMENT d'état
   # (ADR-0003) : s'il s'arrête pendant un éveil, la domotique reste bloquée
@@ -160,43 +196,6 @@ automation:
 #     tout en rendant le dispositif sourd. D'où les détecteurs de cécité.
 # ══════════════════════════════════════════════════════════════════════
 
-counter:
-  babyphone_demarrages:
-    name: Babyphone démarrages
-    icon: mdi:restart-alert
-    step: 1
-
-input_boolean:
-  babyphone_alerte_acquittee:
-    name: Alerte babyphone acquittée
-    icon: mdi:check-decagram
-
-script:
-  # Un seul endroit qui sait parler à Android en critique. Le canal
-  # `alarm_stream_max` joue sur le flux ALARME : il traverse le mode
-  # silencieux et le Ne pas déranger, contrairement à une notification
-  # ordinaire. `ttl: 0` + `priority: high` empêchent la mise en sommeil
-  # de la livraison par l'optimiseur de batterie du téléphone.
-  babyphone_alerte_critique:
-    alias: Babyphone - Envoi d'une alerte critique
-    fields:
-      message: { description: Texte de l'alerte }
-      cible: { description: Service notify destinataire }
-    sequence:
-      - action: "{{ cible }}"
-        data:
-          title: "⚠️ Babyphone"
-          message: "{{ message }}"
-          data:
-            channel: alarm_stream_max
-            ttl: 0
-            priority: high
-            tag: babyphone_panne
-            actions:
-              - action: ACK_BABYPHONE
-                title: Acquitter
-
-automation:
   # ── 1. Panne franche : plus de télémétrie du tout ────────────────────
   # Déclenché sur le CAPTEUR et non sur binary_sensor.babyphone_en_ligne :
   # ce dernier coûte 90 s d'hystérésis plus la granularité d'une minute des
