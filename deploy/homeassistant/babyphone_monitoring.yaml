@@ -47,7 +47,7 @@ template:
         state: "{{ trigger.json.floor | float(-120) | round(1) }}"
         unit_of_measurement: "dB"
         state_class: measurement
-      - name: "Babyphone Duree service"
+      - name: "Babyphone Durée de service"
         unique_id: babyphone_duree_service
         # NE PAS renommer en *_uptime : le recorder exclut ce glob et
         # l'entité cesserait silencieusement d'être historisée.
@@ -356,7 +356,7 @@ automation:
     max: 10
     triggers:
       - trigger: state
-        entity_id: sensor.babyphone_duree_service
+        entity_id: sensor.babyphone_duree_de_service
     conditions:
       # une durée de service qui DÉCROÎT ne peut signifier qu'un redémarrage
       - condition: template
