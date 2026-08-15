@@ -1,0 +1,29 @@
+# Unité systemd du babyphone — lanceur unique (docs/adr/0006).
+# Déploiement : deploy/deploy.sh (copie vers /etc/systemd/system/ sur la cible).
+[Unit]
+Description=Babyphone Audio Monitor
+After=network-online.target sound.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=vlb
+Group=vlb
+WorkingDirectory=/home/vlb/babyphone
+ExecStart=/home/vlb/babyphone/.venv/bin/python /home/vlb/babyphone/main.py
+
+# Le mode de panne dominant est la coupure du micro USB (ADR-0005) : on
+# redémarre toujours. Le verrou d'instance unique du code empêche ce
+# redémarrage de se transformer en conflit sur le périphérique (ADR-0006).
+Restart=always
+RestartSec=3
+
+# Journald, PAS un fichier : `append:/var/log/babyphone.log` avait produit
+# 4,1 Go sans rotation sur une microSD de 29 Go. journald plafonne et fait
+# tourner ses journaux tout seul.
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=babyphone
+
+[Install]
+WantedBy=multi-user.target

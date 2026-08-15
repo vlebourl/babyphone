@@ -1,0 +1,86 @@
+# ── Babyphone monitoring ─────────────────────────────────────────────
+# Source de vérité : dépôt babyphone, deploy/homeassistant/.
+# Déployé vers /config/includes/packages/ par deploy/deploy.sh.
+#
+# Complète lenaic_sleep.yaml (webhooks + input_boolean.lenaic_speaking) :
+# vivacité du dispositif, dernier réveil, statistiques 24 h.
+# Vocabulaire : voir CONTEXT.md du dépôt (« éveil », pas « speaking » —
+# `speaking` n'est que la clé filaire historique, cf. ADR-0003).
+
+template:
+  - binary_sensor:
+      # Comble le trou « panne = silence = tout va bien » : le babyphone
+      # émet un niveau sonore ~1/s quand il tourne ; sans mise à jour
+      # depuis 90 s, il est éteint, planté ou coupé du réseau.
+      - name: "Babyphone en ligne"
+        unique_id: babyphone_en_ligne
+        device_class: connectivity
+        icon: mdi:baby-face-outline
+        state: >
+          {{ states.sensor.babyphone_noise_level is not none
+             and (now() - states.sensor.babyphone_noise_level.last_updated)
+                 < timedelta(seconds=90) }}
+
+  - trigger:
+      - trigger: state
+        entity_id: input_boolean.lenaic_speaking
+        to: "on"
+    sensor:
+      - name: "Babyphone dernier réveil"
+        unique_id: babyphone_dernier_reveil
+        device_class: timestamp
+        state: "{{ now() }}"
+
+sensor:
+  - platform: history_stats
+    name: "Babyphone réveils 24h"
+    unique_id: babyphone_reveils_24h
+    entity_id: input_boolean.lenaic_speaking
+    state: "on"
+    type: count
+    duration:
+      hours: 24
+    end: "{{ now() }}"
+
+  - platform: history_stats
+    name: "Babyphone agitation 24h"
+    unique_id: babyphone_agitation_24h
+    entity_id: input_boolean.lenaic_speaking
+    state: "on"
+    type: time
+    duration:
+      hours: 24
+    end: "{{ now() }}"
+
+automation:
+  # Le babyphone n'émet une transition d'éveil qu'au CHANGEMENT d'état
+  # (ADR-0003) : s'il s'arrête pendant un éveil, la domotique reste bloquée
+  # sur « éveillé » indéfiniment. C'est ce qui produisait des statistiques
+  # d'agitation aberrantes (7 h sur 24 h relevées le 2026-08-15).
+  # Le dispositif hors ligne ne peut rien affirmer : on retombe sur calme.
+  - id: babyphone_hors_ligne_reinitialise_eveil
+    alias: Babyphone - Réinitialise l'éveil quand le dispositif est hors ligne
+    description: >-
+      Évite un état d'éveil bloqué quand le babyphone s'arrête en pleine
+      agitation. Source de vérité : dépôt babyphone, deploy/homeassistant/.
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.babyphone_en_ligne
+        to: "off"
+        for:
+          seconds: 30
+    conditions:
+      - condition: state
+        entity_id: input_boolean.lenaic_speaking
+        state: "on"
+    actions:
+      - action: input_boolean.turn_off
+        target:
+          entity_id: input_boolean.lenaic_speaking
+      - action: logbook.log
+        data:
+          name: Babyphone
+          message: >-
+            éveil réinitialisé (dispositif hors ligne, état non fiable)
+          entity_id: binary_sensor.babyphone_en_ligne
+    mode: single
