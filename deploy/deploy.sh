@@ -71,9 +71,15 @@ deploy_ha() {
     say "Home Assistant — package d'entités et automatisations"
     scp -q -P "$HA_PORT" "$REPO/deploy/homeassistant/babyphone_monitoring.yaml" \
         "$HA_HOST:$HA_PACKAGE"
+    scp -q -P "$HA_PORT" "$REPO/deploy/homeassistant/lovelace_babyphone_view.py" \
+        "$HA_HOST:/tmp/lovelace_babyphone_view.py"
     ssh -p "$HA_PORT" "$HA_HOST" bash -s <<REMOTE
 set -euo pipefail
 ha core check >/dev/null && echo "  ✓ configuration valide"
+# Lovelace vit dans le stockage interne : sauvegarde avant réécriture
+cp /config/.storage/lovelace.lovelace_mobile \
+   /config/.storage/lovelace.lovelace_mobile.bak-deploy 2>/dev/null || true
+python3 /tmp/lovelace_babyphone_view.py
 curl -sf -X POST -H "Authorization: Bearer \$SUPERVISOR_TOKEN" \
     http://supervisor/core/api/services/homeassistant/reload_all >/dev/null \
     && echo "  ✓ rechargé (entités et automatisations)"

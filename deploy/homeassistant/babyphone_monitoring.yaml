@@ -90,6 +90,34 @@ template:
         device_class: timestamp
         state: "{{ now() }}"
 
+  # ── Vue « nuit dernière » (ticket 0007) ────────────────────────────
+  # La question du matin n'est pas « quel est le niveau sonore », c'est
+  # « comment s'est passée la nuit ». Ces capteurs y répondent.
+  - trigger:
+      - trigger: state
+        entity_id: binary_sensor.lenaic_night_asleep
+        to: "on"
+    sensor:
+      - name: "Babyphone Heure endormissement"
+        unique_id: babyphone_heure_endormissement
+        device_class: timestamp
+        state: "{{ now() }}"
+
+  - sensor:
+      # Durée écoulée depuis le dernier éveil : lisible d'un coup d'œil,
+      # là où un horodatage brut demande un calcul mental à 3 h du matin.
+      - name: "Babyphone Calme depuis"
+        unique_id: babyphone_calme_depuis
+        unit_of_measurement: "min"
+        state_class: measurement
+        state: >
+          {% set t = states('sensor.babyphone_dernier_reveil') %}
+          {% if t not in ['unknown', 'unavailable', 'none'] %}
+            {{ ((now() - as_datetime(t)).total_seconds() / 60) | round(0) }}
+          {% else %}
+            0
+          {% endif %}
+
 sensor:
   - platform: history_stats
     name: "Babyphone réveils 24h"
@@ -99,6 +127,20 @@ sensor:
     type: count
     duration:
       hours: 24
+    end: "{{ now() }}"
+
+  - platform: history_stats
+    name: "Babyphone réveils nuit"
+    unique_id: babyphone_reveils_nuit
+    entity_id: input_boolean.lenaic_speaking
+    state: "on"
+    type: count
+    start: >
+      {% if now().hour < 12 %}
+        {{ (now() - timedelta(days=1)).replace(hour=20, minute=0, second=0) }}
+      {% else %}
+        {{ now().replace(hour=20, minute=0, second=0) }}
+      {% endif %}
     end: "{{ now() }}"
 
   - platform: history_stats
