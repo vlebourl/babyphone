@@ -10,3 +10,14 @@ Quelles grandeurs `NoiseReport` doit-il porter pour que la courbe montre la déc
 ## Critère de résolution
 
 Grandeurs publiées, entités HA créées, déployé en prod, et la courbe montre un pic là où le journal montre une transition d'éveil.
+
+---
+## Résolution (2026-08-15) — CLOS
+
+`NoiseReport` porte désormais `peak`, `floor` et `noisy_ratio` en plus de `amplitude` et `threshold`. Clés filaires **additives** : le différentiel contre le code pré-refactor reste identique (717 POST).
+
+Côté Home Assistant, les capteurs de bruit ont dû être **rapatriés** de `lenaic_sleep.yaml` vers le package babyphone : HA n'accepte qu'un seul déclencheur par `webhook_id`, donc ajouter des capteurs imposait de regrouper le bloc. `unique_id` conservés à l'identique (historique préservé), et le `webhook_id` passe par `!secret` — le package est versionné dans un dépôt public.
+
+**Vérifié en prod** : les 5 capteurs alimentés, et la première mesure confirme le diagnostic — moyenne 0,0926 / **pic 0,1213** (+31 %), écart que la courbe ne montrait pas.
+
+**Fait apparaître pour 0002** : le seuil (0,1346) est au-dessus du pic mesuré en journée, ce qui explique une activité nulle en régime calme.

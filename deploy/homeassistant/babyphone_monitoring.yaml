@@ -23,22 +23,29 @@ template:
         webhook_id: !secret babyphone_noise_webhook_id
         local_only: true
     sensor:
+      # Valeurs en dBFS depuis l'ADR-0008 : négatives, 0 = pleine échelle.
+      # L'unité "dB" que ces capteurs portaient déjà devient enfin exacte.
       - name: "Babyphone Noise Level"
         unique_id: lenaic_babyphone_noise_level
-        state: "{{ trigger.json.noise_amplitude | float(0) | round(4) }}"
+        state: "{{ trigger.json.noise_amplitude | float(-120) | round(1) }}"
         unit_of_measurement: "dB"
+        state_class: measurement
       - name: "Babyphone Threshold"
         unique_id: lenaic_babyphone_threshold
-        state: "{{ trigger.json.threshold | float(0) | round(4) }}"
+        state: "{{ trigger.json.threshold | float(-120) | round(1) }}"
         unit_of_measurement: "dB"
+        state_class: measurement
       - name: "Babyphone Pic sonore"
         unique_id: babyphone_peak
-        # le bloc le plus fort de la fenêtre : ce que le détecteur a vu
-        state: "{{ trigger.json.peak | float(0) | round(4) }}"
+        # le bloc le plus fort de la fenêtre : ce que le détecteur a vu,
+        # là où la moyenne l'aurait lissé
+        state: "{{ trigger.json.peak | float(-120) | round(1) }}"
+        unit_of_measurement: "dB"
         state_class: measurement
       - name: "Babyphone Fond sonore"
         unique_id: babyphone_floor
-        state: "{{ trigger.json.floor | float(0) | round(4) }}"
+        state: "{{ trigger.json.floor | float(-120) | round(1) }}"
+        unit_of_measurement: "dB"
         state_class: measurement
       - name: "Babyphone Activité"
         unique_id: babyphone_noisy_ratio

@@ -1,12 +1,16 @@
 """Machine à états de détection : des amplitudes entrent, des transitions d'éveil sortent.
 
+Les amplitudes sont en **dBFS** (négatives, 0 = pleine échelle) — voir ADR-0008.
+Tout le raisonnement du module est donc logarithmique : la marge de seuil est
+une marge en dB, c'est-à-dire un rapport d'énergie constant.
+
 Module pur — aucune E/S, aucune horloge interne, aucun état observable autre que
 les valeurs retournées. L'interface est `feed(amplitude, now) -> Output` ; tout le
 reste (seuil adaptatif médian, confirmation par accumulation, hystérésis, cadence
 de télémétrie — voir docs/adr/0001 et 0002) est de l'implémentation.
 
 Invariants d'interface :
-- `amplitude` est dans [0, 1] (RMS normalisé, cf. CONTEXT.md) ;
+- `amplitude` est en dBFS, typiquement dans [-120, 0] (cf. CONTEXT.md) ;
 - `now` est monotone croissant d'un appel à l'autre ;
 - les appels arrivent à la cadence d'un bloc (`Settings.block_time`) — la fenêtre
   du seuil est dimensionnée en nombre de blocs, pas en temps réel ;
@@ -27,7 +31,12 @@ class Settings:
 
     block_time: float = 0.05  # durée d'un bloc (s)
     window_seconds: float = 120.0  # fenêtre de la médiane du seuil (s)
-    threshold_offset: float = 0.05  # marge ajoutée à la médiane
+    # Marge en dB ajoutée à la médiane. En échelle logarithmique, une marge
+    # additive est un RAPPORT constant : +10 dB = 3,16× l'énergie du fond,
+    # que la chambre soit silencieuse ou bruyante. Calibré sur 78 532
+    # échantillons réels (ADR-0008, ticket 0002) : à volume d'éveils
+    # identique, +20 % de détection la nuit et −50 % de faux positifs le jour.
+    threshold_offset: float = 10.0
     min_noise_duration: float = 0.11  # durée mini d'une salve pour compter comme événement (s)
     event_count: int = 3  # événements accumulés avant de pouvoir déclarer l'éveil
     event_gap: float = 1.5  # écart mini entre deux événements distincts (s)

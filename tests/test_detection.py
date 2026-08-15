@@ -2,7 +2,7 @@
 
 Chaque test rejoue un scénario sonore simulé (spécifications exécutables des
 ADR-0001 et 0002) et n'observe que les valeurs retournées — jamais l'état
-interne. Les amplitudes sont sur l'échelle RMS normalisée [0, 1].
+interne. Les amplitudes sont en dBFS (ADR-0008).
 """
 
 from datetime import datetime, timedelta
@@ -14,8 +14,10 @@ from detection import Detection, Settings
 S = Settings()  # valeurs de production
 T0 = datetime(2026, 1, 1, 2, 0, 0)  # 2 h du matin, une nuit comme une autre
 
-QUIET = 0.005  # fond sonore d'une chambre calme → seuil ≈ 0.055
-LOUD = 0.5  # cri franc, très au-dessus du seuil
+# Amplitudes en dBFS (ADR-0008). Le seuil vaut médiane + 10 dB, donc un son
+# doit dépasser le fond de 10 dB — soit 3,16× son énergie — pour compter.
+QUIET = -46.0  # fond d'une chambre calme (≈ 0,005 en RMS) → seuil ≈ -36 dBFS
+LOUD = -6.0  # cri franc, 40 dB au-dessus du fond
 
 
 def quiet(seconds: float) -> list[float]:
@@ -120,23 +122,46 @@ def test_apres_retour_au_calme_un_nouvel_eveil_doit_se_reconfirmer():
 
 
 def test_un_fond_sonore_qui_monte_lentement_ne_reveille_pas():
-    # Le fond passe de 0.01 à 0.11 en ~4 min : la médiane suit, le seuil
+    # Le fond monte de -40 à -20 dBFS en ~4 min : la médiane suit, le seuil
     # monte avec elle, aucun bloc ne la dépasse jamais de plus de la marge.
-    ramp = [0.01 + i * 2e-5 for i in range(5000)]
+    ramp = [-40.0 + i * 0.004 for i in range(5000)]
     sc = Scenario().play(quiet(10) + ramp)
     assert sc.transitions == []
-    assert sc.detection.threshold > 0.12  # le seuil a bien suivi
+    assert sc.detection.threshold > -18.0  # le seuil a bien suivi
 
 
 def test_le_meme_cri_reveille_quel_que_soit_le_fond():
-    # Dans une pièce bruyante (fond 0.15, seuil ≈ 0.2), un cri à 0.5
-    # déclenche exactement comme dans une pièce calme.
-    noisy_room = [0.15] * int(60 / S.block_time)
+    # C'est LE test que le passage en dB rend vrai (ADR-0008) : pièce
+    # bruyante, fond à -16 dBFS au lieu de -46, soit 30 dB plus haut. Un cri
+    # qui dépasse le fond de la même marge déclenche à l'identique — la
+    # sensibilité ne dépend plus de l'ambiance, ce qui était faux en linéaire.
+    noisy_room = [-16.0] * int(60 / S.block_time)
     sc = Scenario()
     sc.play(noisy_room)
-    loud_bang = [LOUD] * 3 + [0.15]
-    sc.play((loud_bang + [0.15] * 100) * 4)
+    loud_bang = [-4.0] * 3 + [-16.0]
+    sc.play((loud_bang + [-16.0] * 100) * 4)
     assert [t.awake for t in sc.transitions] == [True]
+
+
+def test_la_sensibilite_est_identique_quel_que_soit_le_fond_sonore():
+    """La propriété que l'ADR-0008 achète, verrouillée explicitement.
+
+    Le même scénario, translaté de 30 dB (chambre calme → pièce bruyante),
+    doit produire exactement les mêmes transitions aux mêmes instants.
+    En échelle linéaire c'était faux : la marge additive valait 2,75× le fond
+    la nuit contre 2,06× le jour.
+    """
+    def scenario(floor: float) -> list[float]:
+        salve = [floor + 20.0] * 3 + [floor]
+        return [floor] * 200 + (salve + [floor] * 100) * 4
+
+    calme = Scenario().play(scenario(-46.0))
+    bruyante = Scenario().play(scenario(-16.0))
+
+    assert [(t.awake, t.at) for t in calme.transitions] == [
+        (t.awake, t.at) for t in bruyante.transitions
+    ]
+    assert [t.awake for t in calme.transitions] == [True]
 
 
 # --- Robustesse : horloge sans RTC (le Pi recale l'heure via NTP après le boot) ---
@@ -169,7 +194,7 @@ def test_le_seuil_est_exactement_la_mediane_plus_la_marge():
     window = []
     now = T0
     for _ in range(500):
-        a = rng.random() * 0.3
+        a = -60.0 + rng.random() * 40.0
         window.append(a)
         window = window[-20:]
         det.feed(a, now)
@@ -199,7 +224,7 @@ def test_le_rapport_expose_le_pic_que_la_moyenne_ecrase():
     sc = Scenario().play(quiet(3) + [LOUD] * 3 + quiet(1))
     r = sc.reports[-1]
     assert r.peak == pytest.approx(LOUD)
-    assert r.amplitude < LOUD / 2  # la moyenne, elle, a bien lissé
+    assert r.amplitude < LOUD - 10  # la moyenne, elle, a bien lissé
     assert r.floor == pytest.approx(QUIET)
 
 

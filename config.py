@@ -19,7 +19,6 @@ DEFAULT_NOISE_URL = "http://localhost/api/webhook/noise-babyphone"
 
 # Application settings
 SPEAKING_TIMEOUT = 180  # seconds before considering silence
-NOISE_THRESHOLD_ADJUSTMENT = 0.05  # adjustment added to median for threshold
 MIN_NOISE_DURATION = 0.11  # minimum noise duration to trigger an event
 NOISE_EVENT_COUNT = 3  # number of noise events before considering speaking
 NOISE_EVENT_TIMEOUT = 1.5  # seconds between noise events

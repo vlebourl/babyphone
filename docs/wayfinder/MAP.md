@@ -18,6 +18,10 @@ Les cinq améliorations issues de l'étude du 2026-08-15 — télémétrie enric
 
 ## Decisions so far
 
+- [Télémétrie enrichie : publier ce que le détecteur voit réellement](tickets/0001-telemetrie-enrichie.md) — `peak`, `floor`, `noisy_ratio` ajoutés (additif) ; capteurs de bruit rapatriés dans le package babyphone, `webhook_id` en `!secret`
+
+- [Choisir l'offset en dB par rejeu des données historiques](tickets/0002-calibrer-offset-db.md) — **+10 dB** retenu : volume d'éveils identique, +20 % la nuit, −50 % de faux positifs le jour (rejeu de 78 532 échantillons)
+
 <!-- une ligne par ticket clos : le gist, puis zoomer le lien pour le détail -->
 
 ## Not yet specified

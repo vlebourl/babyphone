@@ -64,6 +64,21 @@ def acquire_single_instance_lock(path: str = LOCK_PATH):
     return handle
 
 
+# Plancher du silence numérique : évite log10(0) = -inf quand le micro rend
+# des blocs strictement nuls. -120 dBFS est très en dessous de tout fond réel.
+SILENCE_FLOOR = 1e-6
+MIN_DBFS = 20 * math.log10(SILENCE_FLOOR)
+
+
+def to_dbfs(rms: float) -> float:
+    """Convertit un RMS normalisé [0, 1] en dBFS (négatif, 0 = pleine échelle).
+
+    L'échelle logarithmique est celle de la perception sonore, et elle rend
+    la sensibilité du seuil indépendante du fond ambiant (ADR-0008).
+    """
+    return 20 * math.log10(max(rms, SILENCE_FLOOR))
+
+
 def get_rms(block: bytes) -> float:
     """RMS normalisé [0, 1] d'un bloc PCM 16 bits.
 
@@ -95,7 +110,11 @@ class MicrophoneSource:
         self._error_count = 0
 
     def readings(self) -> Iterator[tuple[datetime, float]]:
-        """Flux infini de (instant, amplitude), résilient aux coupures du micro."""
+        """Flux infini de (instant, amplitude en dBFS), résilient aux coupures.
+
+        L'amplitude sort en dBFS et non en RMS linéaire : c'est l'unité de
+        toute la chaîne en aval (ADR-0008).
+        """
         while True:
             try:
                 block = self._stream.read(
@@ -112,7 +131,7 @@ class MicrophoneSource:
             # lecture réussie : le seuil de reset compte des erreurs CONSÉCUTIVES,
             # pas un cumul sur toute la vie du processus
             self._error_count = 0
-            yield datetime.now(), get_rms(block)
+            yield datetime.now(), to_dbfs(get_rms(block))
 
     def close(self):
         """Libère le flux et la pile audio."""

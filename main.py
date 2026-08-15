@@ -7,8 +7,7 @@ from datetime import datetime
 from audio_source import (AlreadyRunning, MicrophoneSource,
                           acquire_single_instance_lock)
 from config import (INPUT_BLOCK_TIME, MIN_NOISE_DURATION, NOISE_EVENT_COUNT,
-                    NOISE_EVENT_TIMEOUT, NOISE_THRESHOLD_ADJUSTMENT, NOISE_URL,
-                    SPEAKING_TIMEOUT, URL)
+                    NOISE_EVENT_TIMEOUT, NOISE_URL, SPEAKING_TIMEOUT, URL)
 from detection import Detection, Output, Settings, Transition
 from emitter import WebhookEmitter
 
@@ -30,7 +29,6 @@ def main():
     detection = Detection(
         Settings(
             block_time=INPUT_BLOCK_TIME,
-            threshold_offset=NOISE_THRESHOLD_ADJUSTMENT,
             min_noise_duration=MIN_NOISE_DURATION,
             event_count=NOISE_EVENT_COUNT,
             event_gap=NOISE_EVENT_TIMEOUT,
