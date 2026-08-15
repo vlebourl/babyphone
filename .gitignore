@@ -173,4 +173,10 @@ cython_debug/
 # PyPI configuration file
 .pypirc
 
+# Babyphone
+# URLs de webhook porteuses du secret d'authentification (voir docs/adr/0003)
 secrets.py
+# Enregistrements audio : ne quittent jamais l'appareil (voir docs/adr/0004)
+clips/
+# Fichiers d'échange vim
+*.sw[a-p]
