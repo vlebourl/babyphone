@@ -55,12 +55,18 @@ class WebhookEmitter:
     def publish(self, output: Output) -> None:
         # télémétrie d'abord, transitions ensuite : ordre historique du dispositif
         # (le niveau sonore était émis avant la décision dans chaque bloc)
-        if output.noise_report is not None:
+        if (r := output.noise_report) is not None:
+            # `noise_amplitude` et `threshold` sont le contrat historique avec
+            # la domotique : ne pas renommer sans déployer les deux tiers
+            # ensemble (ADR-0007). Les autres clés sont purement additives.
             self._post(
                 self._noise_url,
                 {
-                    "noise_amplitude": output.noise_report.amplitude,
-                    "threshold": output.noise_report.threshold,
+                    "noise_amplitude": r.amplitude,
+                    "threshold": r.threshold,
+                    "peak": r.peak,
+                    "floor": r.floor,
+                    "noisy_ratio": r.noisy_ratio,
                 },
             )
 

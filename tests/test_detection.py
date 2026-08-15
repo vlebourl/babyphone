@@ -193,6 +193,25 @@ def test_le_rapport_reflete_la_moyenne_recente_et_le_seuil():
     assert report.threshold == pytest.approx(QUIET + S.threshold_offset)
 
 
+def test_le_rapport_expose_le_pic_que_la_moyenne_ecrase():
+    # Le cœur du ticket 0001 : une salve courte dans une fenêtre calme est
+    # invisible dans la moyenne, mais doit apparaître dans `peak`.
+    sc = Scenario().play(quiet(3) + [LOUD] * 3 + quiet(1))
+    r = sc.reports[-1]
+    assert r.peak == pytest.approx(LOUD)
+    assert r.amplitude < LOUD / 2  # la moyenne, elle, a bien lissé
+    assert r.floor == pytest.approx(QUIET)
+
+
+def test_noisy_ratio_compte_les_blocs_au_dessus_du_seuil():
+    sc = Scenario().play(quiet(3))
+    assert sc.reports[-1].noisy_ratio == 0.0  # que du calme
+    # 2,5 s de bruit continu : garantit qu'un rapport tombe sur une fenêtre
+    # entièrement bruyante (les rapports sont émis toutes les ~1,05 s)
+    sc = Scenario().play(quiet(3) + [LOUD] * int(2.5 / S.block_time))
+    assert sc.reports[-1].noisy_ratio == pytest.approx(1.0)  # que du bruit
+
+
 def test_les_rapports_continuent_pendant_un_eveil():
     sc = Scenario().play(quiet(10) + (bang() + quiet(5)) * 4)
     before = len(sc.reports)

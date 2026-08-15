@@ -48,10 +48,19 @@ class Transition:
 
 @dataclass(frozen=True)
 class NoiseReport:
-    """Télémétrie continue : niveau sonore récent et seuil courant."""
+    """Télémétrie continue de la fenêtre écoulée.
 
-    amplitude: float
-    threshold: float
+    `amplitude` est la moyenne — utile pour l'ambiance, mais elle lisse
+    précisément les pics qui déclenchent la décision : la décision se prend
+    par bloc, la moyenne porte sur une vingtaine de blocs. `peak` et
+    `noisy_ratio` sont ce qui rend la décision lisible depuis une courbe.
+    """
+
+    amplitude: float  # moyenne de la fenêtre (contrat filaire historique)
+    threshold: float  # seuil courant, identique pour tous les blocs de la fenêtre
+    peak: float = 0.0  # bloc le plus fort — ce que le détecteur a réellement vu
+    floor: float = 0.0  # bloc le plus faible — le vrai fond sonore, non lissé
+    noisy_ratio: float = 0.0  # part des blocs au-dessus du seuil, dans [0, 1]
 
 
 @dataclass(frozen=True)
@@ -161,4 +170,11 @@ class Detection:
             return None
         self._last_report_at = now
         recent = list(self._amplitudes)[-blocks:]
-        return NoiseReport(amplitude=mean(recent), threshold=self._threshold)
+        noisy = sum(1 for a in recent if a > self._threshold)
+        return NoiseReport(
+            amplitude=mean(recent),
+            threshold=self._threshold,
+            peak=max(recent),
+            floor=min(recent),
+            noisy_ratio=noisy / len(recent),
+        )

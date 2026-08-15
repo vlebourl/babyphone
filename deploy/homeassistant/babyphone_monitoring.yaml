@@ -8,6 +8,45 @@
 # `speaking` n'est que la clé filaire historique, cf. ADR-0003).
 
 template:
+  # Capteurs alimentés par le webhook de niveau sonore. Rapatriés depuis
+  # lenaic_sleep.yaml : ils appartiennent au babyphone (ADR-0007), et Home
+  # Assistant n'accepte qu'un seul déclencheur par webhook_id — les ajouter
+  # ici imposait de les regrouper. Les `unique_id` sont conservés à
+  # l'identique pour que les entités gardent leur historique.
+  #
+  # Télémétrie enrichie (ticket 0001) : la moyenne seule lissait les pics qui
+  # déclenchent la décision — la courbe pouvait afficher « calme » pendant que
+  # le détecteur voyait un cri. `peak` et `noisy_ratio` rendent la décision
+  # lisible depuis un graphe, donc tout réglage de constante vérifiable.
+  - trigger:
+      - trigger: webhook
+        webhook_id: !secret babyphone_noise_webhook_id
+        local_only: true
+    sensor:
+      - name: "Babyphone Noise Level"
+        unique_id: lenaic_babyphone_noise_level
+        state: "{{ trigger.json.noise_amplitude | float(0) | round(4) }}"
+        unit_of_measurement: "dB"
+      - name: "Babyphone Threshold"
+        unique_id: lenaic_babyphone_threshold
+        state: "{{ trigger.json.threshold | float(0) | round(4) }}"
+        unit_of_measurement: "dB"
+      - name: "Babyphone Pic sonore"
+        unique_id: babyphone_peak
+        # le bloc le plus fort de la fenêtre : ce que le détecteur a vu
+        state: "{{ trigger.json.peak | float(0) | round(4) }}"
+        state_class: measurement
+      - name: "Babyphone Fond sonore"
+        unique_id: babyphone_floor
+        state: "{{ trigger.json.floor | float(0) | round(4) }}"
+        state_class: measurement
+      - name: "Babyphone Activité"
+        unique_id: babyphone_noisy_ratio
+        # part des blocs au-dessus du seuil sur la dernière seconde
+        state: "{{ (trigger.json.noisy_ratio | float(0) * 100) | round(0) }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+
   - binary_sensor:
       # Comble le trou « panne = silence = tout va bien » : le babyphone
       # émet un niveau sonore ~1/s quand il tourne ; sans mise à jour
