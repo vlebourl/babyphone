@@ -10,7 +10,8 @@
       ],
       "env": {
         "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
-        "npm_config_cache": "/Users/vlb/.cache/npm-stitch"
+        "npm_config_cache": "/Users/vlb/.cache/npm-stitch",
+        "STITCH_API_KEY": "${STITCH_API_KEY}"
       }
     }
   }
