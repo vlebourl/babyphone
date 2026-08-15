@@ -18,6 +18,14 @@ import pyaudio
 
 from config import CHANNELS, FORMAT, INPUT_BLOCK_TIME, RATE, SHORT_NORMALIZE
 
+try:
+    # RMS en C : ~50× plus rapide que la boucle Python, crucial dans le budget
+    # de 50 ms par bloc de la cible (ADR-0005). Déprécié (retiré en 3.13) mais
+    # présent sur le Python 3.11 de Bookworm ; repli pur Python sinon.
+    import audioop
+except ImportError:  # pragma: no cover - dépend de la version de Python
+    audioop = None
+
 # Calculate frames per block based on rate and block time
 INPUT_FRAMES_PER_BLOCK = int(RATE * INPUT_BLOCK_TIME)
 
@@ -25,13 +33,19 @@ MAX_READ_ERRORS = 5  # au-delà, on réinitialise complètement la pile audio
 
 
 def get_rms(block: bytes) -> float:
-    """Calculate the Root Mean Square of the audio block."""
-    count = len(block) / 2
+    """RMS normalisé [0, 1] d'un bloc PCM 16 bits.
+
+    L'écart entre les deux chemins est < 1/32768 (arrondi entier d'audioop),
+    très en dessous de toute marge de décision.
+    """
+    count = len(block) // 2
     if count == 0:
         return 0.0  # lecture vide (flux en cours de coupure) : silence, pas de crash
-    formatting = "%dh" % (count)
-    shorts = struct.unpack(formatting, block)
 
+    if audioop is not None:
+        return audioop.rms(block, 2) * SHORT_NORMALIZE
+
+    shorts = struct.unpack("%dh" % count, block)
     sum_squares = 0.0
     for sample in shorts:
         n = sample * SHORT_NORMALIZE

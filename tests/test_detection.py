@@ -151,6 +151,32 @@ def test_un_recul_d_horloge_ne_rend_pas_la_detection_sourde():
     assert [t.awake for t in sc.transitions] == [True]
 
 
+# --- Optimisation : la fenêtre triée maintient exactement la médiane ---
+
+
+def test_le_seuil_est_exactement_la_mediane_plus_la_marge():
+    # La fenêtre triée incrémentale (optimisation CPU pour la cible) doit
+    # rester bit-à-bit identique à statistics.median, y compris quand la
+    # fenêtre est pleine et évince ses plus anciennes valeurs.
+    import random
+    from statistics import median
+
+    from detection import Detection, Settings
+
+    small = Settings(window_seconds=1.0)  # fenêtre de 20 blocs : éviction rapide
+    det = Detection(small)
+    rng = random.Random(42)
+    window = []
+    now = T0
+    for _ in range(500):
+        a = rng.random() * 0.3
+        window.append(a)
+        window = window[-20:]
+        det.feed(a, now)
+        assert det.threshold == median(window) + small.threshold_offset
+        now += timedelta(seconds=small.block_time)
+
+
 # --- Télémétrie : le niveau sonore, cadencé et moyenné ---
 
 

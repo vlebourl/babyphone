@@ -14,10 +14,11 @@ Invariants d'interface :
   modifier isolément.
 """
 
+from bisect import bisect_left, insort
 from collections import deque
 from dataclasses import dataclass
 from datetime import datetime, timedelta
-from statistics import mean, median
+from statistics import mean
 
 
 @dataclass(frozen=True)
@@ -70,6 +71,11 @@ class Detection:
         self._amplitudes: deque[float] = deque(
             maxlen=int(settings.window_seconds / settings.block_time)
         )
+        # Miroir trié de la fenêtre, maintenu par insertions/suppressions
+        # dichotomiques : la médiane devient une lecture O(1) au lieu d'un tri
+        # complet de la fenêtre à chaque bloc — le budget CPU d'un bloc sur la
+        # cible (ADR-0005) est de 50 ms, dépassement = overflow du flux audio.
+        self._sorted_amplitudes: list[float] = []
         self._threshold = 0.0
         self._noisy_blocks = 0
         self._event_count = 0
@@ -92,8 +98,12 @@ class Detection:
         if self._last_report_at is not None and now < self._last_report_at:
             self._last_report_at = now
 
+        if len(self._amplitudes) == self._amplitudes.maxlen:
+            evicted = self._amplitudes[0]  # va sortir de la fenêtre
+            del self._sorted_amplitudes[bisect_left(self._sorted_amplitudes, evicted)]
         self._amplitudes.append(amplitude)
-        self._threshold = median(self._amplitudes) + s.threshold_offset
+        insort(self._sorted_amplitudes, amplitude)
+        self._threshold = self._median() + s.threshold_offset
 
         report = self._maybe_report(now)
         transitions: list[Transition] = []
@@ -124,6 +134,14 @@ class Detection:
             self._noisy_blocks = 0
 
         return Output(transitions=tuple(transitions), noise_report=report)
+
+    def _median(self) -> float:
+        """Médiane de la fenêtre — mêmes conventions que statistics.median."""
+        data = self._sorted_amplitudes
+        n = len(data)
+        if n % 2:
+            return data[n // 2]
+        return (data[n // 2 - 1] + data[n // 2]) / 2
 
     def _set_awake(self, awake: bool, now: datetime, noise_duration: float):
         if awake == self._awake:

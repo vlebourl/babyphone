@@ -10,7 +10,7 @@ status: deprecated
 
 La rétention n'est pas une durée mais une **pression disque** : tant qu'il reste de la place, les clips s'accumulent ; en dessous d'un seuil d'espace libre, les plus anciens sont supprimés. Sur un appareil dédié à demeure, on ne veut ni saturer le disque, ni jeter un clip encore utile parce qu'un calendrier l'a décidé.
 
-Le stockage est une carte microSD ([ADR-0005](0005-cible-raspberry-pi-3a-plus.md)) : petite, lente, et seule ressource disque de la machine. Saturer la carte ne remplit pas juste un dossier de clips, ça met l'OS en panne — d'où une purge pilotée par l'espace libre global et non par la taille du dossier.
+Le stockage est une carte microSD ([ADR-0005](0005-cible-raspberry-pi-3.md)) : petite, lente, et seule ressource disque de la machine. Saturer la carte ne remplit pas juste un dossier de clips, ça met l'OS en panne — d'où une purge pilotée par l'espace libre global et non par la taille du dossier.
 
 ## Conséquences
 

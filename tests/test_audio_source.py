@@ -22,6 +22,27 @@ def test_rms_est_normalise_entre_0_et_1():
     assert get_rms(full_scale) == pytest.approx(1.0, abs=1e-3)
 
 
+def test_le_chemin_audioop_et_le_repli_python_donnent_le_meme_rms(monkeypatch):
+    # L'optimisation C (audioop) et le repli pur Python doivent coïncider
+    # à l'arrondi entier d'audioop près (1/32768), sur des blocs réalistes.
+    import random
+
+    import audio_source
+
+    if audio_source.audioop is None:
+        pytest.skip("audioop absent de ce Python")
+
+    rng = random.Random(7)
+    for _ in range(20):
+        samples = [rng.randint(-32768, 32767) for _ in range(2400)]
+        block = struct.pack("<2400h", *samples)
+        fast = get_rms(block)
+        monkeypatch.setattr(audio_source, "audioop", None)
+        slow = get_rms(block)
+        monkeypatch.undo()
+        assert fast == pytest.approx(slow, abs=1.5 / 32768)
+
+
 class ScriptedStream:
     """Rejoue une séquence de lectures : bytes → bloc rendu, Exception → levée."""
 
