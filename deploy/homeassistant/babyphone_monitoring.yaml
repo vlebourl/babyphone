@@ -145,8 +145,11 @@ sensor:
     entity_id: input_boolean.lenaic_speaking
     state: "on"
     type: count
+    # La nuit « en cours » commence au dernier 20 h révolu. Le seuil doit
+    # donc être 20 h, pas midi : avec `< 12`, tout l'après-midi renvoyait
+    # un début de fenêtre DANS LE FUTUR et history_stats rendait `unknown`.
     start: >
-      {% if now().hour < 12 %}
+      {% if now().hour < 20 %}
         {{ (now() - timedelta(days=1)).replace(hour=20, minute=0, second=0) }}
       {% else %}
         {{ now().replace(hour=20, minute=0, second=0) }}
