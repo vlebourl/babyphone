@@ -431,6 +431,14 @@ automation:
       - trigger: numeric_state
         entity_id: counter.babyphone_demarrages
         above: 3
+    conditions:
+      # Même armement que tous les autres détecteurs (ADR-0009) : on n'alerte
+      # que si la surveillance est demandée. Sans cette condition, l'alerte
+      # partait en critique alors que le babyphone était éteint — et un
+      # déploiement, qui redémarre légitimement le service, la déclenchait.
+      - condition: state
+        entity_id: input_boolean.babyphone_on_off
+        state: "on"
     actions:
       - action: script.babyphone_alerte_critique
         data:

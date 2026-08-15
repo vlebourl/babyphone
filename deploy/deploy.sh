@@ -73,6 +73,15 @@ systemctl is-active --quiet babyphone.service \
     && echo "  ✓ service actif — $(git log --oneline -1)" \
     || { echo "  ✗ service en échec :"; sudo journalctl -u babyphone -n 20 --no-pager; exit 1; }
 REMOTE
+    # Un déploiement redémarre le service légitimement : sans cette remise à
+    # zéro, plusieurs déploiements rapprochés déclenchent l'alerte de boucle
+    # de redémarrage — un faux positif fabriqué par l'outillage lui-même.
+    ssh -p "$HA_PORT" "$HA_HOST" \
+        'curl -sf -X POST -H "Authorization: Bearer $SUPERVISOR_TOKEN" \
+         -H "Content-Type: application/json" \
+         -d "{\"entity_id\":\"counter.babyphone_demarrages\"}" \
+         http://supervisor/core/api/services/counter/reset >/dev/null' \
+        && echo "  compteur de démarrages remis à zéro"
 }
 
 deploy_ha() {
