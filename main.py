@@ -1,283 +1,58 @@
+"""Composition de l'application : micro → détection → domotique."""
+
 import logging
-import math
-import struct
-from collections import deque
-from datetime import datetime, timedelta
-from statistics import mean, median
+from datetime import datetime
 
-import pyaudio
-import requests
-from ratelimit import limits, sleep_and_retry
-from requests.adapters import HTTPAdapter
-from urllib3.util.retry import Retry
-
-# Import configuration from a separate file
-from config import (CHANNELS, FORMAT, INITIAL_THRESHOLD,
-                    INPUT_BLOCK_TIME, MIN_NOISE_DURATION, NOISE_EVENT_COUNT,
+from audio_source import MicrophoneSource
+from config import (INPUT_BLOCK_TIME, MIN_NOISE_DURATION, NOISE_EVENT_COUNT,
                     NOISE_EVENT_TIMEOUT, NOISE_THRESHOLD_ADJUSTMENT, NOISE_URL,
-                    RATE, SHORT_NORMALIZE, SPEAKING_TIMEOUT, URL)
+                    SPEAKING_TIMEOUT, URL)
+from detection import Detection, Output, Settings, Transition
+from emitter import WebhookEmitter
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s:%(levelname)s:%(message)s",
 )
 
-# Calculate frames per block based on rate and block time
-INPUT_FRAMES_PER_BLOCK = int(RATE * INPUT_BLOCK_TIME)
-
-
-# Create a Session with retry capability
-def create_session():
-    session = requests.Session()
-    retries = Retry(total=5, backoff_factor=1, status_forcelist=[502, 503, 504])
-    adapter = HTTPAdapter(pool_connections=1, pool_maxsize=10, max_retries=retries)
-    session.mount("http://", adapter)
-    session.mount("https://", adapter)
-    return session
-
-
-# Global session
-session = create_session()
-
-
-def get_rms(block):
-    """Calculate the Root Mean Square of the audio block."""
-    count = len(block) / 2
-    formatting = "%dh" % (count)
-    shorts = struct.unpack(formatting, block)
-
-    sum_squares = 0.0
-    for sample in shorts:
-        n = sample * SHORT_NORMALIZE
-        sum_squares += n * n
-
-    return math.sqrt(sum_squares / count)
-
-
-class ApiClient:
-    """Handles API communication."""
-
-    def __init__(self, session):
-        self.session = session
-
-    @sleep_and_retry
-    @limits(calls=1, period=1)
-    def post(self, url, json_data):
-        """Send a POST request to the specified URL with rate limiting."""
-        try:
-            response = self.session.post(url, json=json_data)
-            response.raise_for_status()
-            logging.info(f"Response status ({url}): {response.status_code}")
-            return response
-        except requests.exceptions.RequestException as e:
-            logging.error(f"API request failed: {e}")
-            return None
-
-
-class TapTester:
-    """Main class for audio monitoring and processing."""
-
-    def __init__(self):
-        self.pa = pyaudio.PyAudio()
-        self.stream = self.open_mic_stream()
-        self.threshold = INITIAL_THRESHOLD
-        self.noisycount = 0
-        self.errorcount = 0
-        self.last_events_time = datetime(1900, 1, 1)
-        self.speaking = True
-        self.noise_event = 0
-        self.amplitudes = deque(maxlen=int(120 / INPUT_BLOCK_TIME))
-        self.send_noise_level_timestamp = datetime.now()
-
-        self.api_client = ApiClient(session)
-
-        self.send_speaking(False, message="Starting")
-        logging.info("Initialized TapTester")
-
-    def stop(self):
-        """Stop the audio stream."""
-        if self.stream:
-            self.stream.close()
-        if self.pa:
-            self.pa.terminate()
-
-    def reset(self):
-        """Reset the audio stream."""
-        self.stop()
-        self.pa = pyaudio.PyAudio()
-        self.stream = self.open_mic_stream()
-
-    def find_input_device(self):
-        """Find a suitable input device."""
-        device_index = None
-        for i in range(self.pa.get_device_count()):
-            devinfo = self.pa.get_device_info_by_index(i)
-            logging.info("Device %d: %s" % (i, devinfo["name"]))
-
-            for keyword in ["mic", "input"]:
-                if keyword in devinfo["name"].lower():
-                    logging.info(
-                        "Found an input: device %d - %s" % (i, devinfo["name"])
-                    )
-                    return i
-
-        logging.info("No preferred input found; using default input device.")
-        return device_index
-
-    def open_mic_stream(self):
-        """Open and configure the microphone stream."""
-        device_index = self.find_input_device()
-
-        return self.pa.open(
-            format=FORMAT,
-            channels=CHANNELS,
-            rate=RATE,
-            input=True,
-            input_device_index=device_index,
-            frames_per_buffer=INPUT_FRAMES_PER_BLOCK,
-        )
-
-    def display_amplitude(self, amplitude):
-        """Display a visual representation of the current amplitude."""
-        length = 100
-        max_amplitude = 0.2
-        vec = [f' {"TALKING" if self.speaking else "SILENT "} [']
-        for i in range(length):
-            if i <= amplitude * length / max_amplitude:
-                vec.append(
-                    "#" if i > INITIAL_THRESHOLD * length / max_amplitude else "*"
-                )
-            else:
-                vec.append(" ")
-        vec[int(self.threshold * length / max_amplitude)] = "|"
-        vec.extend(
-            (
-                "] ",
-                f"level: {amplitude:.4f} threshold={self.threshold:.4f}, "
-                f"Noise lasted for {self.noisycount * INPUT_BLOCK_TIME:.2f}s"
-                "                 \r",
-            )
-        )
-        logging.info("".join(vec))
-
-    def send_noise_level(self):
-        """Send the current noise level to the server."""
-        DURATION_WINDOW = 1.0  # seconds
-        if len(self.amplitudes) < DURATION_WINDOW / INPUT_BLOCK_TIME:
-            return
-
-        if datetime.now() - self.send_noise_level_timestamp > timedelta(seconds=1):
-            recent_amplitudes = [
-                self.amplitudes[i]
-                for i in range(
-                    len(self.amplitudes) - int(DURATION_WINDOW / INPUT_BLOCK_TIME),
-                    len(self.amplitudes),
-                )
-            ]
-
-            noise_amplitude = mean(recent_amplitudes)
-            json_data = {
-                "noise_amplitude": noise_amplitude,
-                "threshold": self.threshold,
-            }
-
-            self.api_client.post(NOISE_URL, json_data)
-            logging.debug(f"{datetime.now().isoformat()} {json_data}")
-            self.send_noise_level_timestamp = datetime.now()
-
-    def send_speaking(self, speaking: bool, message: str = ""):
-        """Send a message to the server to indicate whether the user is speaking."""
-        logging.info(f"send speaking {speaking}: {message}")
-        if speaking != self.speaking:
-            self.speaking = speaking
-            json_data = {
-                "speaking": speaking,
-                "time": datetime.now().isoformat(),
-                "noise": self.noisycount * INPUT_BLOCK_TIME,
-                "message": message,
-            }
-
-            self.api_client.post(URL, json_data)
-            logging.info(f"{datetime.now().isoformat()} {json_data}")
-
-    def process_amplitude(self, amplitude: float) -> None:
-        """Process the current amplitude value."""
-        self.amplitudes.append(amplitude)
-        self.threshold = median(self.amplitudes) + NOISE_THRESHOLD_ADJUSTMENT
-
-        # Uncomment to display amplitude visualization
-        # self.display_amplitude(amplitude)
-
-        self.send_noise_level()
-
-        if amplitude > self.threshold:
-            # noisy block
-            self.noisycount += 1
-        else:
-            # quiet block.
-            if self.noisycount * INPUT_BLOCK_TIME >= MIN_NOISE_DURATION:
-                if (
-                    datetime.now() - self.last_events_time
-                    > timedelta(seconds=NOISE_EVENT_TIMEOUT)
-                    and self.noise_event >= NOISE_EVENT_COUNT
-                ):
-                    self.send_speaking(True)
-                logging.info(
-                    f"{datetime.now().isoformat()} NOISE,  "
-                    f"duration is {self.noisycount * INPUT_BLOCK_TIME:.4f} "
-                    f"count is {self.noise_event}"
-                )
-                self.noise_event += 1
-                self.last_events_time = datetime.now()
-
-            if datetime.now() - self.last_events_time > timedelta(
-                seconds=SPEAKING_TIMEOUT
-            ):
-                self.send_speaking(False)
-                if self.noise_event > 0:
-                    logging.info(
-                        f"{datetime.now().isoformat()} SILENT, "
-                        f"duration is {self.noisycount * INPUT_BLOCK_TIME:.4f} "
-                        f"count is {self.noise_event}"
-                    )
-                self.noise_event = 0
-
-            self.noisycount = 0
-
-    def listen(self):
-        """Listen for audio input and process it."""
-        try:
-            block = self.stream.read(
-                INPUT_FRAMES_PER_BLOCK, exception_on_overflow=False
-            )
-            amplitude = get_rms(block)
-            self.process_amplitude(amplitude)
-        except IOError as e:
-            self.errorcount += 1
-            logging.info("(%d) Error recording: %s" % (self.errorcount, e))
-            self.noisycount = 1
-            if self.errorcount > 5:
-                logging.warning("Too many errors, resetting audio stream")
-                self.reset()
-                self.errorcount = 0
-        except Exception as e:
-            logging.exception(f"Unexpected error in listen: {e}")
-
 
 def main():
     """Main function to run the application."""
-    tt = TapTester()
+    detection = Detection(
+        Settings(
+            block_time=INPUT_BLOCK_TIME,
+            threshold_offset=NOISE_THRESHOLD_ADJUSTMENT,
+            min_noise_duration=MIN_NOISE_DURATION,
+            event_count=NOISE_EVENT_COUNT,
+            event_gap=NOISE_EVENT_TIMEOUT,
+            calm_timeout=SPEAKING_TIMEOUT,
+        )
+    )
+    emitter = WebhookEmitter(URL, NOISE_URL)
+    source = MicrophoneSource()
+
+    # Signale le (re)démarrage : état calme explicite vers la domotique
+    emitter.publish(
+        Output(
+            transitions=(
+                Transition(
+                    awake=False, at=datetime.now(), noise_duration=0.0, message="Starting"
+                ),
+            )
+        )
+    )
+
     try:
         logging.info("Starting audio monitoring...")
-        while True:
-            tt.listen()
+        for now, amplitude in source.readings():
+            try:
+                emitter.publish(detection.feed(amplitude, now))
+            except Exception:
+                logging.exception("Unexpected error in processing loop")
     except KeyboardInterrupt:
         logging.info("Application stopped by user")
-    except Exception as e:
-        logging.exception("An error occurred during execution")
     finally:
-        tt.stop()
+        source.close()
         logging.info("Application shutdown complete")
 
 

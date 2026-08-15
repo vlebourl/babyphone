@@ -13,6 +13,13 @@ dependencies = [
     "requests>=2.32.3",
 ]
 
+[dependency-groups]
+dev = ["pytest>=8.0"]
+
 [tool.uv]
 # Script à plat (main.py), pas un paquet installable : uv n'installe que les dépendances
 package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]

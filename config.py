@@ -3,12 +3,10 @@ Configuration settings for the babyphone application.
 """
 
 import logging
-from typing import Any, Dict
 
 import pyaudio
 
 # Audio settings
-INITIAL_THRESHOLD = 0.09
 FORMAT = pyaudio.paInt16
 SHORT_NORMALIZE = 1.0 / 32768.0
 CHANNELS = 1
@@ -35,8 +33,3 @@ except ImportError:
     logging.warning("secrets.py not found, using default API endpoints")
     URL = DEFAULT_URL
     NOISE_URL = DEFAULT_NOISE_URL
-
-
-def get_config() -> Dict[str, Any]:
-    """Return all configuration as a dictionary for easier access."""
-    return {k: v for k, v in globals().items() if not k.startswith("_") and k.isupper()}
