@@ -152,18 +152,22 @@ NUIT = {
             "header": {"show": True, "title": "Sept dernières nuits", "show_states": False},
             "graph_span": "7d",
             "span": {"start": "day"},
-            "chart_type": "bar",
+            # Les histogrammes se déclarent par `type: column` SUR LA SÉRIE.
+            # `chart_type` n'accepte que line, scatter, pie, donut, radialBar :
+            # y mettre "bar" fait rejeter toute la carte.
             "apex_config": {"chart": {"height": 170}},
             "series": [
                 {
                     "entity": "sensor.lenaic_night_asleep_duration",
                     "name": "Sommeil (h)",
+                    "type": "column",
                     "color": "#5b8def",
                     "group_by": {"func": "max", "duration": "1d"},
                 },
                 {
                     "entity": "sensor.babyphone_reveils_24h",
                     "name": "Réveils",
+                    "type": "column",
                     "color": "#e0954f",
                     "group_by": {"func": "max", "duration": "1d"},
                 },
