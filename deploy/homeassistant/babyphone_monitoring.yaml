@@ -47,6 +47,13 @@ template:
         state: "{{ trigger.json.floor | float(-120) | round(1) }}"
         unit_of_measurement: "dB"
         state_class: measurement
+      - name: "Babyphone Durée de service"
+        unique_id: babyphone_duree_service
+        # NE PAS renommer en *_uptime : le recorder exclut ce glob et
+        # l'entité cesserait silencieusement d'être historisée.
+        state: "{{ trigger.json.uptime_s | float(0) | round(0) }}"
+        unit_of_measurement: "s"
+        state_class: measurement
       - name: "Babyphone Activité"
         unique_id: babyphone_noisy_ratio
         # part des blocs au-dessus du seuil sur la dernière seconde
@@ -62,9 +69,15 @@ template:
         unique_id: babyphone_en_ligne
         device_class: connectivity
         icon: mdi:baby-face-outline
+        # `last_reported` et NON `last_updated` : Home Assistant ne
+        # rafraîchit pas `last_updated` quand la valeur réécrite est
+        # identique. Micro débranché → amplitude constante → le dispositif
+        # se serait déclaré hors ligne alors qu'il tourne parfaitement,
+        # envoyant diagnostiquer un Pi qui n'a rien. La cécité micro est
+        # traitée par ses propres détecteurs, plus bas.
         state: >
           {{ states.sensor.babyphone_noise_level is not none
-             and (now() - states.sensor.babyphone_noise_level.last_updated)
+             and (now() - states.sensor.babyphone_noise_level.last_reported)
                  < timedelta(seconds=90) }}
 
   - trigger:
@@ -130,3 +143,272 @@ automation:
             éveil réinitialisé (dispositif hors ligne, état non fiable)
           entity_id: binary_sensor.babyphone_en_ligne
     mode: single
+
+# ══════════════════════════════════════════════════════════════════════
+# Surveillance du surveillant (ticket 0005)
+#
+# Conçu contre un grilling adversarial (ticket 0004) qui a invalidé la
+# proposition initiale sur trois faits vérifiés en production :
+#   — les téléphones sont des Pixel : `interruption-level: critical` est
+#     iOS uniquement, il aurait été ignoré EN SILENCE. Android exige
+#     `channel: alarm_stream_max` pour traverser le Ne pas déranger.
+#   — l'alerte est hébergée par le système surveillé : si HA, le Wi-Fi ou
+#     le WAN tombent, personne n'est prévenu. Couvert par un chien de
+#     garde EXTERNE côté Pi, hors de cette pile (voir docs/adr/0009).
+#   — « en ligne » ne veut pas dire « voyant » : un micro mort, saturé, ou
+#     un service qui redémarre en boucle laissent la télémétrie couler
+#     tout en rendant le dispositif sourd. D'où les détecteurs de cécité.
+# ══════════════════════════════════════════════════════════════════════
+
+counter:
+  babyphone_demarrages:
+    name: Babyphone démarrages
+    icon: mdi:restart-alert
+    step: 1
+
+input_boolean:
+  babyphone_alerte_acquittee:
+    name: Alerte babyphone acquittée
+    icon: mdi:check-decagram
+
+script:
+  # Un seul endroit qui sait parler à Android en critique. Le canal
+  # `alarm_stream_max` joue sur le flux ALARME : il traverse le mode
+  # silencieux et le Ne pas déranger, contrairement à une notification
+  # ordinaire. `ttl: 0` + `priority: high` empêchent la mise en sommeil
+  # de la livraison par l'optimiseur de batterie du téléphone.
+  babyphone_alerte_critique:
+    alias: Babyphone - Envoi d'une alerte critique
+    fields:
+      message: { description: Texte de l'alerte }
+      cible: { description: Service notify destinataire }
+    sequence:
+      - action: "{{ cible }}"
+        data:
+          title: "⚠️ Babyphone"
+          message: "{{ message }}"
+          data:
+            channel: alarm_stream_max
+            ttl: 0
+            priority: high
+            tag: babyphone_panne
+            actions:
+              - action: ACK_BABYPHONE
+                title: Acquitter
+
+automation:
+  # ── 1. Panne franche : plus de télémétrie du tout ────────────────────
+  # Déclenché sur le CAPTEUR et non sur binary_sensor.babyphone_en_ligne :
+  # ce dernier coûte 90 s d'hystérésis plus la granularité d'une minute des
+  # templates contenant now(), soit 3,5 à 4,5 min de latence réelle pour un
+  # seuil affiché à 2 min. Sur le capteur, 180 s veut dire 180 s.
+  #
+  # 180 s est choisi au-dessus du plus long rétablissement autonome :
+  # backoff audio (1+2+4+8+16+30 = 61 s) + redémarrage systemd (~15 s) +
+  # réassociation Wi-Fi (~20 s) ≈ 96 s au pire, doublé pour la marge.
+  - id: babyphone_panne_franche
+    alias: Babyphone - Panne, plus aucune télémétrie
+    mode: restart
+    triggers:
+      - trigger: state
+        entity_id: sensor.babyphone_noise_level
+        for: "00:03:00"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.babyphone_alerte_acquittee
+        state: "off"
+    actions:
+      # Surveillance non demandée : on informe UNE fois, sans réveiller.
+      # L'interrupteur ne doit jamais produire un silence total — c'est une
+      # commande, pas un état, et il est exposé à l'assistant vocal.
+      - if:
+          - condition: state
+            entity_id: input_boolean.babyphone_on_off
+            state: "off"
+        then:
+          - action: notify.mobile_app_pixel_9_pro
+            data:
+              title: Babyphone
+              message: Surveillance inactive et dispositif hors ligne.
+              data: { tag: babyphone_panne }
+        else:
+          # Escalade : 4 tentatives sur 20 min, second parent dès la 2e,
+          # puis canal physique qui ne dépend d'aucun téléphone.
+          - repeat:
+              count: 4
+              sequence:
+                - action: script.babyphone_alerte_critique
+                  data:
+                    cible: notify.mobile_app_pixel_9_pro
+                    message: >-
+                      Plus de signal depuis {{ 3 + (repeat.index - 1) * 5 }} min.
+                      La chambre n'est plus surveillée.
+                - if: "{{ repeat.index >= 2 }}"
+                  then:
+                    - action: script.babyphone_alerte_critique
+                      data:
+                        cible: notify.mobile_app_pixel_7a
+                        message: >-
+                          Plus de signal depuis {{ 3 + (repeat.index - 1) * 5 }} min.
+                          La chambre n'est plus surveillée.
+                - wait_for_trigger:
+                    - trigger: state
+                      entity_id: input_boolean.babyphone_alerte_acquittee
+                      to: "on"
+                    - trigger: state
+                      entity_id: sensor.babyphone_noise_level
+                  timeout: "00:05:00"
+                - if: "{{ wait.trigger is not none }}"
+                  then:
+                    - stop: Acquitté ou dispositif revenu
+          # Personne n'a répondu en 20 min : canal physique.
+          # Canal physique : ne dépend d'aucun téléphone, d'aucun cloud,
+          # d'aucune connexion sortante. Le seul qui survive à un WAN mort.
+          - action: light.turn_on
+            target: { area_id: 0ee1f72b729d45a397bcce37caec4a1e }
+            data: { brightness_pct: 100 }
+
+  # ── 2. Acquittement depuis la notification ───────────────────────────
+  - id: babyphone_acquittement
+    alias: Babyphone - Acquittement d'alerte
+    mode: single
+    triggers:
+      - trigger: event
+        event_type: mobile_app_notification_action
+        event_data: { action: ACK_BABYPHONE }
+    actions:
+      - action: input_boolean.turn_on
+        target: { entity_id: input_boolean.babyphone_alerte_acquittee }
+
+  # Réarmement : dès que le dispositif revient, l'acquittement est levé,
+  # sinon une panne acquittée masquerait toutes les suivantes.
+  - id: babyphone_rearmement
+    alias: Babyphone - Réarmement de l'alerte au retour du dispositif
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.babyphone_en_ligne
+        to: "on"
+      - trigger: state
+        entity_id: input_boolean.babyphone_alerte_acquittee
+        to: "on"
+        for: "01:00:00"
+    actions:
+      - action: input_boolean.turn_off
+        target: { entity_id: input_boolean.babyphone_alerte_acquittee }
+
+  # ── 3. Cécité : en ligne, mais ne voit rien ──────────────────────────
+  # Seuils en dBFS depuis l'ADR-0008. Le grilling les avait exprimés en
+  # RMS linéaire (< 0,0001 et > 0,30) : traduits ici en -80 dB et -11 dB.
+  - id: babyphone_micro_muet
+    alias: Babyphone - Micro muet, dispositif aveugle
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.babyphone_pic_sonore
+        below: -80
+        for: "00:10:00"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.babyphone_on_off
+        state: "on"
+    actions:
+      - action: script.babyphone_alerte_critique
+        data:
+          cible: notify.mobile_app_pixel_9_pro
+          message: >-
+            Micro muet depuis 10 min : silence numérique, pas une chambre
+            calme. Le dispositif tourne mais n'entend rien.
+
+  # Un fond sonore très élevé pousse la médiane, donc le seuil, si haut
+  # qu'un gémissement ne peut plus le franchir : sourd par construction,
+  # tout en se déclarant parfaitement sain.
+  - id: babyphone_micro_sature
+    alias: Babyphone - Fond sonore masquant
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: sensor.babyphone_fond_sonore
+        above: -11
+        for: "00:10:00"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.babyphone_on_off
+        state: "on"
+    actions:
+      - action: notify.mobile_app_pixel_9_pro
+        data:
+          title: Babyphone
+          message: >-
+            Fond sonore très élevé depuis 10 min (ventilation, fenêtre ?).
+            Le seuil monte avec lui : les sons faibles ne sont plus détectés.
+          data: { tag: babyphone_sature }
+
+  # ── 4. Boucle de redémarrage — le mode de panne le plus dangereux ────
+  # Chaque cycle réémet de la télémétrie, donc « en ligne » reste vert.
+  # Mais Detection repart de zéro à chaque fois : il faut 4 événements de
+  # bruit espacés pour atteindre l'éveil (ADR-0002), donc avec un cycle de
+  # quelques secondes l'éveil devient MATHÉMATIQUEMENT inatteignable. Le
+  # dispositif est totalement sourd, envoie des faux « calme » à chaque
+  # démarrage, et tous les voyants sont au vert.
+  - id: babyphone_compte_demarrages
+    alias: Babyphone - Compte les démarrages
+    mode: queued
+    max: 10
+    triggers:
+      - trigger: state
+        entity_id: sensor.babyphone_duree_service
+    conditions:
+      # une durée de service qui DÉCROÎT ne peut signifier qu'un redémarrage
+      - condition: template
+        value_template: >-
+          {{ trigger.from_state is not none
+             and trigger.to_state.state | float(-1) >= 0
+             and trigger.from_state.state | float(-1) >= 0
+             and trigger.to_state.state | float < trigger.from_state.state | float }}
+    actions:
+      - action: counter.increment
+        target: { entity_id: counter.babyphone_demarrages }
+
+  - id: babyphone_boucle_redemarrage
+    alias: Babyphone - Boucle de redémarrage détectée
+    mode: single
+    triggers:
+      - trigger: numeric_state
+        entity_id: counter.babyphone_demarrages
+        above: 3
+    actions:
+      - action: script.babyphone_alerte_critique
+        data:
+          cible: notify.mobile_app_pixel_9_pro
+          message: >-
+            Le babyphone redémarre en boucle. Il paraît en ligne mais ne
+            peut plus détecter d'éveil. Vérifier l'alimentation du Pi.
+      - delay: "00:15:00"
+      - action: counter.reset
+        target: { entity_id: counter.babyphone_demarrages }
+
+  # ── 5. Interrupteur divergent ────────────────────────────────────────
+  # Le service systemd est `enabled` : après une coupure de courant il
+  # démarre quel que soit l'interrupteur, qui affiche alors « éteint »
+  # pendant que le dispositif tourne. L'inverse est plus grave et couvert
+  # par la panne franche.
+  - id: babyphone_interrupteur_divergent
+    alias: Babyphone - Interrupteur incohérent avec la réalité
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: binary_sensor.babyphone_en_ligne
+        to: "on"
+        for: "00:05:00"
+    conditions:
+      - condition: state
+        entity_id: input_boolean.babyphone_on_off
+        state: "off"
+    actions:
+      - action: notify.mobile_app_pixel_9_pro
+        data:
+          title: Babyphone
+          message: >-
+            Le babyphone tourne alors que l'interrupteur est sur « éteint ».
+          data: { tag: babyphone_divergence }

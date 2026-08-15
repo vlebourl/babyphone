@@ -68,11 +68,41 @@ def test_chaque_post_est_borne_par_un_timeout():
 def test_les_retries_http_s_appliquent_bien_aux_post():
     # urllib3 exclut POST des retries par défaut : le status_forcelist
     # historique n'a jamais servi. Vérifie que la session le réactive.
-    session = create_session()
+    session = create_session(total=2, backoff_factor=0.3)
     retries = session.get_adapter("http://192.168.1.10/").max_retries
     assert "POST" in {m.upper() for m in retries.allowed_methods}
-    assert retries.total == 5
+    assert retries.total == 2
     assert 503 in retries.status_forcelist
+
+
+def test_la_telemetrie_n_insiste_jamais_et_la_transition_un_peu():
+    # Les envois sont synchrones dans la boucle d'écoute : chaque seconde
+    # d'attente est une seconde sans lecture du micro. Un rapport de niveau
+    # perdu est remplacé une seconde plus tard ; une transition, non.
+    calls = []
+
+    class Recording(FakeSession):
+        def __init__(self, tag):
+            super().__init__()
+            self.tag = tag
+
+        def post(self, url, json=None, timeout=None):
+            calls.append((self.tag, timeout))
+            return super().post(url, json=json, timeout=timeout)
+
+    emitter = WebhookEmitter(
+        "http://ha/wake", "http://ha/noise",
+        session=Recording("transition"), telemetry_session=Recording("telemetrie"),
+    )
+    emitter.publish(Output(
+        transitions=(Transition(awake=True, at=T, noise_duration=0.15),),
+        noise_report=NoiseReport(amplitude=-30.0, threshold=-20.0),
+    ))
+    tags = dict((t, to) for t, to in calls)
+    # la télémétrie a un budget d'attente strictement plus court
+    assert sum(tags["telemetrie"]) < sum(tags["transition"])
+    # et le pire cas total reste tenable pour la boucle d'écoute
+    assert sum(tags["transition"]) <= 6
 
 
 def test_le_secret_du_webhook_n_est_jamais_journalise(caplog):
