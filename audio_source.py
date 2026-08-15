@@ -18,7 +18,13 @@ from typing import Iterator
 
 import pyaudio
 
-from config import CHANNELS, FORMAT, INPUT_BLOCK_TIME, RATE, SHORT_NORMALIZE
+from config import (CHANNELS, FORMAT, INPUT_BLOCK_TIME, RATE, SHORT_NORMALIZE,
+                    VOICE_BAND_HIGH, VOICE_BAND_LOW)
+
+try:
+    import numpy as np
+except ImportError:  # pragma: no cover - la cible l'a toujours
+    np = None
 
 try:
     # RMS en C : ~50× plus rapide que la boucle Python, crucial dans le budget
@@ -79,6 +85,31 @@ def to_dbfs(rms: float) -> float:
     return 20 * math.log10(max(rms, SILENCE_FLOOR))
 
 
+# Bornes de la bande vocale exprimées en indices de raie FFT. Une raie vaut
+# RATE/INPUT_FRAMES_PER_BLOCK = 20 Hz ici.
+_BAND_LO = int(VOICE_BAND_LOW * INPUT_FRAMES_PER_BLOCK / RATE)
+_BAND_HI = int(VOICE_BAND_HIGH * INPUT_FRAMES_PER_BLOCK / RATE)
+
+
+def band_rms(block: bytes) -> float:
+    """RMS normalisé de la seule bande vocale (ADR-0010).
+
+    On ne veut pas le signal filtré, seulement son énergie : une FFT la donne
+    directement par Parseval, sans filtre récursif ni état à maintenir. Un
+    biquad équivalent en Python pur coûtait 25 ms par bloc sur la cible — la
+    moitié du budget ; cette voie en coûte 0,9 ms.
+
+    Repli sur le RMS large bande si numpy est absent : le dispositif reste
+    fonctionnel, simplement moins sélectif.
+    """
+    if np is None or len(block) < 4:
+        return get_rms(block)
+    x = np.frombuffer(block, dtype="<i2").astype(np.float32)
+    spec = np.fft.rfft(x)[_BAND_LO:_BAND_HI]
+    power = float((spec.real**2 + spec.imag**2).sum())
+    return math.sqrt(2 * power) / len(x) * SHORT_NORMALIZE
+
+
 def get_rms(block: bytes) -> float:
     """RMS normalisé [0, 1] d'un bloc PCM 16 bits.
 
@@ -131,7 +162,7 @@ class MicrophoneSource:
             # lecture réussie : le seuil de reset compte des erreurs CONSÉCUTIVES,
             # pas un cumul sur toute la vie du processus
             self._error_count = 0
-            yield datetime.now(), to_dbfs(get_rms(block))
+            yield datetime.now(), to_dbfs(band_rms(block))
 
     def close(self):
         """Libère le flux et la pile audio."""

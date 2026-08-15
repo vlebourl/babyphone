@@ -11,8 +11,12 @@ La plus petite tranche d'audio observable, celle sur laquelle une amplitude est 
 _Éviter_ : frame, buffer, chunk
 
 **Amplitude** :
-L'énergie sonore d'un bloc, exprimée en dBFS — négative, 0 étant la pleine échelle. C'est la seule grandeur extraite du son ; le contenu du signal n'est jamais analysé.
+L'énergie sonore d'un bloc **dans la bande vocale**, exprimée en dBFS — négative, 0 étant la pleine échelle. C'est la seule grandeur extraite du son ; le contenu du signal n'est jamais analysé.
 _Éviter_ : volume, niveau, RMS
+
+**Bande vocale** :
+L'intervalle de fréquences où vivent les pleurs, 300 à 4000 Hz. Tout ce qui est en dehors est ignoré : dans une chambre, 94 % de l'énergie sonore est du grondement basse fréquence sans rapport avec l'enfant (voir [ADR-0010](docs/adr/0010-mesure-limitee-a-la-bande-vocale.md)).
+_Éviter_ : filtre, passe-bande, spectre
 
 **Marge** :
 L'écart, en dB, qu'un bloc doit avoir au-dessus du fond sonore pour compter comme bruyant. Étant un écart logarithmique, c'est un rapport d'énergie constant : la sensibilité ne dépend pas de l'ambiance (voir [ADR-0008](docs/adr/0008-detection-en-dbfs.md)).

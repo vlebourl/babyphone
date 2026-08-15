@@ -94,3 +94,60 @@ def test_six_erreurs_consecutives_declenchent_un_reset():
     src = make_source(script)
     next(src.readings())
     assert src._resets == 1
+
+
+# --- Bande vocale (ADR-0010) ---
+
+def _tone(freq, amplitude=8000, n=INPUT_FRAMES_PER_BLOCK, rate=48000):
+    import math
+    return struct.pack(
+        f"<{n}h", *[int(amplitude * math.sin(2 * math.pi * freq * i / rate)) for i in range(n)]
+    )
+
+
+def test_un_son_dans_la_bande_vocale_est_mesure_comme_le_large_bande():
+    from audio_source import band_rms, get_rms
+
+    tone = _tone(700)  # au cœur de la bande 300-4000
+    assert band_rms(tone) == pytest.approx(get_rms(tone), rel=0.02)
+
+
+def test_un_grondement_basse_frequence_est_massivement_attenue():
+    # 94 % de l'énergie du fond de la chambre vit sous 300 Hz. C'est
+    # exactement ce que la mesure de bande doit cesser de voir.
+    from audio_source import band_rms, get_rms
+
+    rumble = _tone(60)
+    assert get_rms(rumble) > 0.15  # bien présent en large bande
+    assert band_rms(rumble) < get_rms(rumble) / 100  # au moins 40 dB plus bas
+
+
+def test_un_cri_emerge_mieux_d_un_grondement_apres_selection_de_bande():
+    """La propriété que l'ADR-0010 achète, sur signal synthétique.
+
+    Fond de grondement + cri dans la bande vocale : l'écart entre « avec
+    cri » et « sans cri » doit être nettement plus grand en bande vocale.
+    """
+    import math
+
+    from audio_source import band_rms, get_rms
+
+    n = INPUT_FRAMES_PER_BLOCK
+    rumble = [12000 * math.sin(2 * math.pi * 60 * i / 48000) for i in range(n)]
+    cry = [4000 * math.sin(2 * math.pi * 800 * i / 48000) for i in range(n)]
+    fond = struct.pack(f"<{n}h", *[int(v) for v in rumble])
+    avec = struct.pack(f"<{n}h", *[int(a + b) for a, b in zip(rumble, cry)])
+
+    def emergence(f):
+        return 20 * math.log10(f(avec) / f(fond))
+
+    assert emergence(band_rms) > emergence(get_rms) + 10
+
+
+def test_repli_sur_le_large_bande_si_numpy_absent(monkeypatch):
+    import audio_source
+    from audio_source import band_rms, get_rms
+
+    tone = _tone(700)
+    monkeypatch.setattr(audio_source, "np", None)
+    assert band_rms(tone) == pytest.approx(get_rms(tone))

@@ -13,6 +13,13 @@ CHANNELS = 1
 RATE = 48000  # Sample rate
 INPUT_BLOCK_TIME = 0.05  # Time in seconds for each audio block
 
+# Bande vocale retenue pour la mesure d'énergie (ADR-0010). Mesuré dans la
+# chambre : 94 % de l'énergie du fond sonore vit sous 300 Hz (grondement,
+# ventilation, circulation) et n'a rien à voir avec l'enfant. Ne mesurer que
+# 300–4000 Hz fait passer l'émergence d'un cri de 6,4 dB à 15,2 dB.
+VOICE_BAND_LOW = 300
+VOICE_BAND_HIGH = 4000
+
 # Default API endpoints (will be overridden by secrets.py if available)
 DEFAULT_URL = "http://localhost/api/webhook/babyphone"
 DEFAULT_NOISE_URL = "http://localhost/api/webhook/noise-babyphone"
