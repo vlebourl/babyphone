@@ -2,13 +2,16 @@
   "mcpServers": {
     "stitch": {
       "type": "stdio",
-      "command": "npx",
+      "command": "/opt/homebrew/bin/npx",
       "args": [
         "-y",
         "@_davideast/stitch-mcp",
         "proxy"
       ],
-      "env": {}
+      "env": {
+        "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
+        "npm_config_cache": "/Users/vlb/.cache/npm-stitch"
+      }
     }
   }
 }
