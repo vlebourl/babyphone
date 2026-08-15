@@ -1,9 +1,11 @@
 """Composition de l'application : micro → détection → domotique."""
 
 import logging
+import sys
 from datetime import datetime
 
-from audio_source import MicrophoneSource
+from audio_source import (AlreadyRunning, MicrophoneSource,
+                          acquire_single_instance_lock)
 from config import (INPUT_BLOCK_TIME, MIN_NOISE_DURATION, NOISE_EVENT_COUNT,
                     NOISE_EVENT_TIMEOUT, NOISE_THRESHOLD_ADJUSTMENT, NOISE_URL,
                     SPEAKING_TIMEOUT, URL)
@@ -18,6 +20,13 @@ logging.basicConfig(
 
 def main():
     """Main function to run the application."""
+    try:
+        # gardé ouvert pour toute la vie du processus : le fermer libère le verrou
+        lock = acquire_single_instance_lock()  # noqa: F841
+    except AlreadyRunning as e:
+        logging.error("%s", e)
+        return 1
+
     detection = Detection(
         Settings(
             block_time=INPUT_BLOCK_TIME,
@@ -54,7 +63,8 @@ def main():
     finally:
         source.close()
         logging.info("Application shutdown complete")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

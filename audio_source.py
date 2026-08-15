@@ -7,8 +7,10 @@ L'interface est `readings()` ; en test, n'importe quel itérable de
 (datetime, float) remplit le même rôle sans adaptateur dédié.
 """
 
+import fcntl
 import logging
 import math
+import os
 import struct
 import time
 from datetime import datetime
@@ -30,6 +32,36 @@ except ImportError:  # pragma: no cover - dépend de la version de Python
 INPUT_FRAMES_PER_BLOCK = int(RATE * INPUT_BLOCK_TIME)
 
 MAX_READ_ERRORS = 5  # au-delà, on réinitialise complètement la pile audio
+
+# Le micro USB n'accepte qu'un seul client ALSA : deux instances du babyphone
+# se disputent le périphérique et la seconde meurt en « Device unavailable ».
+# Le verrou rend le démarrage sûr quel que soit le lanceur (systemd, domotique
+# par SSH, lancement manuel) — voir docs/adr/0006.
+LOCK_PATH = "/tmp/babyphone.lock"
+
+
+class AlreadyRunning(RuntimeError):
+    """Une autre instance détient déjà le micro."""
+
+
+def acquire_single_instance_lock(path: str = LOCK_PATH):
+    """Prend un verrou exclusif non bloquant ; rend l'objet fichier à garder ouvert.
+
+    Le verrou est libéré automatiquement par le noyau à la mort du processus,
+    y compris sur SIGKILL — pas de fichier PID périmé à nettoyer.
+    """
+    handle = open(path, "w")
+    try:
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except OSError as e:
+        handle.close()
+        raise AlreadyRunning(
+            f"Une autre instance du babyphone tourne déjà (verrou {path}). "
+            "Vérifier avec `systemctl status babyphone` et `pgrep -af main.py`."
+        ) from e
+    handle.write(str(os.getpid()))
+    handle.flush()
+    return handle
 
 
 def get_rms(block: bytes) -> float:
@@ -112,18 +144,37 @@ class MicrophoneSource:
                 delay = min(delay * 2, 30)
 
     def _find_input_device(self):
-        """Heuristique ALSA/Pi : premier périphérique nommé « mic » ou « input »."""
+        """Choisit le micro parmi les périphériques CAPABLES de capturer.
+
+        Le filtre sur `maxInputChannels` est essentiel : la sortie casque
+        intégrée du Pi s'appelle « bcm2835 Headphones » et un nom de
+        périphérique de sortie peut contenir « mic » ou « input ». La
+        sélectionner produirait un « Device unavailable » incompréhensible
+        au lieu d'un message clair.
+        """
+        candidates = []
         for i in range(self._pa.get_device_count()):
             devinfo = self._pa.get_device_info_by_index(i)
-            logging.info("Device %d: %s", i, devinfo["name"])
+            inputs = int(devinfo["maxInputChannels"])
+            logging.info("Device %d: %s (entrées: %d)", i, devinfo["name"], inputs)
+            if inputs > 0:
+                candidates.append((i, devinfo["name"]))
 
-            for keyword in ["mic", "input"]:
-                if keyword in devinfo["name"].lower():
-                    logging.info("Found an input: device %d - %s", i, devinfo["name"])
+        for keyword in ["mic", "input"]:
+            for i, name in candidates:
+                if keyword in name.lower():
+                    logging.info("Found an input: device %d - %s", i, name)
                     return i
 
-        logging.info("No preferred input found; using default input device.")
-        return None
+        if candidates:
+            i, name = candidates[0]
+            logging.warning("No preferred input found; falling back to %d - %s", i, name)
+            return i
+
+        raise RuntimeError(
+            "Aucun périphérique de capture disponible : le micro USB est-il "
+            "branché ? (vérifier avec `arecord -l`)"
+        )
 
     def _open_mic_stream(self):
         return self._pa.open(
