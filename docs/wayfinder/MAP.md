@@ -22,6 +22,8 @@ Les cinq améliorations issues de l'étude du 2026-08-15 — télémétrie enric
 
 - [Choisir l'offset en dB par rejeu des données historiques](tickets/0002-calibrer-offset-db.md) — **+10 dB** retenu : volume d'éveils identique, +20 % la nuit, −50 % de faux positifs le jour (rejeu de 78 532 échantillons)
 
+- [Passer la détection en dBFS](tickets/0003-detection-dbfs.md) — conversion dans la source audio, `Detection` inchangée ; capteurs HA enfin honnêtes en dB (ADR-0008)
+
 <!-- une ligne par ticket clos : le gist, puis zoomer le lien pour le détail -->
 
 ## Not yet specified
