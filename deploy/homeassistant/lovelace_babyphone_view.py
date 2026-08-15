@@ -1,15 +1,13 @@
 #!/usr/bin/env python3
 """Tableau de bord Babyphone — source de vérité (ADR-0007).
 
-Deux vues, deux publics :
-
-- **Babyphone** : ce qu'un parent veut savoir. Temps réel, nuit écoulée,
-  tendances. Aucune donnée technique, aucun dBFS.
-- **Babyphone · Système** : la santé du dispositif. Télémétrie brute,
-  diagnostic, alimentation. C'est là qu'on va quand quelque chose cloche.
+Une seule vue, cinq sections, du plus urgent au plus technique : ce qui se
+passe maintenant, la nuit écoulée, les tendances, la santé du dispositif,
+puis la télémétrie brute. Un parent s'arrête après la troisième ; on
+descend jusqu'aux deux dernières quand quelque chose cloche.
 
 Lovelace vit dans le stockage interne de Home Assistant, pas en YAML : ce
-script écrit les vues de façon idempotente et remplace les existantes.
+script écrit la vue de façon idempotente et remplace l'existante.
 Déployé et exécuté par deploy/deploy.sh.
 """
 
@@ -63,7 +61,7 @@ def titre(t, s=None):
 
 
 # ══════════════════════════════════════════════════════════════════════
-# VUE 1 — Babyphone : ce qu'un parent veut savoir
+# Sections de surveillance — en haut de page
 # ══════════════════════════════════════════════════════════════════════
 
 ETAT_ACTUEL = {
@@ -122,7 +120,6 @@ ETAT_ACTUEL = {
                     " else 'mdi:access-point-off' }}",
                     "{{ 'green' if is_state('binary_sensor.babyphone_en_ligne', 'on')"
                     " else 'red' }}",
-                    {"action": "navigate", "navigation_path": "/lovelace-mobile/babyphone-systeme"},
                 ),
                 tuile(
                     "input_boolean.babyphone_on_off",
@@ -234,42 +231,12 @@ TENDANCES = {
                 }
             ],
         },
-        {
-            "type": "custom:mushroom-template-card",
-            "primary": "Diagnostic du dispositif",
-            "secondary": "Télémétrie, alimentation, redémarrages",
-            "icon": "mdi:heart-pulse",
-            "icon_color": (
-                "{{ 'red' if is_state('sensor.babyphone_sous_tension', 'Oui')"
-                " else 'grey' }}"
-            ),
-            "fill_container": True,
-            "tap_action": {"action": "navigate",
-                           "navigation_path": "/lovelace-mobile/babyphone-systeme"},
-        },
     ],
-}
-
-VUE_SURVEILLANCE = {
-    "theme": "Backend-selected",
-    "title": "Babyphone",
-    "path": "babyphone",
-    "icon": "mdi:baby-face-outline",
-    "type": "sections",
-    "max_columns": 2,
-    "badges": [
-        {"type": "entity", "show_name": False, "show_state": True, "show_icon": True,
-         "entity": "binary_sensor.babyphone_en_ligne"},
-        {"type": "entity", "show_name": False, "show_state": True, "show_icon": True,
-         "entity": "input_boolean.lenaic_speaking"},
-    ],
-    "cards": [],
-    "sections": [ETAT_ACTUEL, NUIT, TENDANCES],
 }
 
 
 # ══════════════════════════════════════════════════════════════════════
-# VUE 2 — Babyphone · Système : la santé du dispositif
+# Sections techniques — plus bas sur la même page
 # ══════════════════════════════════════════════════════════════════════
 
 SANTE = {
@@ -411,22 +378,22 @@ TELEMETRIE = {
     ],
 }
 
-VUE_SYSTEME = {
+
+VUE = {
     "theme": "Backend-selected",
-    "title": "Babyphone · Système",
-    "path": "babyphone-systeme",
-    "icon": "mdi:heart-pulse",
+    "title": "Babyphone",
+    "path": "babyphone",
+    "icon": "mdi:baby-face-outline",
     "type": "sections",
-    "subview": True,
     "max_columns": 2,
     "badges": [
         {"type": "entity", "show_name": False, "show_state": True, "show_icon": True,
-         "entity": "sensor.babyphone_duree_de_service"},
+         "entity": "binary_sensor.babyphone_en_ligne"},
         {"type": "entity", "show_name": False, "show_state": True, "show_icon": True,
-         "entity": "sensor.babyphone_sous_tension"},
+         "entity": "input_boolean.lenaic_speaking"},
     ],
     "cards": [],
-    "sections": [SANTE, TELEMETRIE],
+    "sections": [ETAT_ACTUEL, NUIT, TENDANCES, SANTE, TELEMETRIE],
 }
 
 
@@ -435,17 +402,22 @@ def main():
         data = json.load(f)
     views = data["data"]["config"]["views"]
 
-    for vue in (VUE_SURVEILLANCE, VUE_SYSTEME):
-        for i, v in enumerate(views):
-            if v.get("path") == vue["path"]:
-                views[i] = vue
-                print(f"  vue « {vue['path']} » remplacée (position {i})")
-                break
-        else:
-            idx = next((i for i, v in enumerate(views) if v.get("path") == "babyphone"),
-                       len(views) - 1)
-            views.insert(idx + 1, vue)
-            print(f"  vue « {vue['path']} » insérée (position {idx + 1})")
+    # la sous-vue système a été fusionnée : on la retire si elle traîne encore
+    avant = len(views)
+    views[:] = [v for v in views if v.get("path") != "babyphone-systeme"]
+    if len(views) != avant:
+        print("  ancienne sous-vue « babyphone-systeme » retirée")
+
+    for i, v in enumerate(views):
+        if v.get("path") == VUE["path"]:
+            views[i] = VUE
+            print(f"  vue « babyphone » remplacée (position {i})")
+            break
+    else:
+        idx = next((i for i, v in enumerate(views) if v.get("path") == "lenaic"),
+                   len(views) - 1)
+        views.insert(idx + 1, VUE)
+        print(f"  vue « babyphone » insérée (position {idx + 1})")
 
     with open(PATH, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
