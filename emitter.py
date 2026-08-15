@@ -15,6 +15,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from detection import Output
+from health import read_undervoltage
 
 
 # Les deux flux n'ont pas la même valeur, donc pas la même obstination.
@@ -68,6 +69,7 @@ class WebhookEmitter:
         noise_url: str,
         session: "requests.Session | None" = None,
         telemetry_session: "requests.Session | None" = None,
+        out_of_band=None,
     ):
         self._url = url
         self._noise_url = noise_url
@@ -84,6 +86,9 @@ class WebhookEmitter:
         # de zéro à chaque cycle et ne peut plus jamais confirmer un éveil
         # (ADR-0002). Une durée qui DÉCROÎT trahit le redémarrage.
         self._started_at = time.monotonic()
+        # Canal de secours : prévenu de chaque succès et de chaque échec, il
+        # décide seul quand la domotique est absente depuis trop longtemps.
+        self._out_of_band = out_of_band
 
     def publish(self, output: Output) -> None:
         # télémétrie d'abord, transitions ensuite : ordre historique du dispositif
@@ -101,6 +106,7 @@ class WebhookEmitter:
                     "floor": r.floor,
                     "noisy_ratio": r.noisy_ratio,
                     "uptime_s": round(time.monotonic() - self._started_at, 1),
+                    "undervoltage": read_undervoltage(),
                 },
                 session=self._telemetry_session,
                 timeout=TELEMETRY_TIMEOUT,
@@ -126,6 +132,8 @@ class WebhookEmitter:
                 url, json=json_data, timeout=timeout or TRANSITION_TIMEOUT
             )
             response.raise_for_status()
+            if self._out_of_band is not None:
+                self._out_of_band.note_success(time.monotonic())
             # DEBUG et pas INFO : un POST par seconde, soit ~86 000 lignes par
             # jour sur une microSD (ADR-0005). Et l'URL porte le secret
             # d'authentification du webhook (ADR-0003) : l'écrire en clair à
@@ -134,6 +142,11 @@ class WebhookEmitter:
             return response
         except requests.exceptions.RequestException as e:
             logging.error("API request failed (%s): %s", _redact(url), e)
+            if self._out_of_band is not None:
+                self._out_of_band.note_failure(
+                    time.monotonic(),
+                    "Babyphone: domotique injoignable, la chambre n'est plus surveillee",
+                )
             return None
 
 

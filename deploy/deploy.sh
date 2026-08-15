@@ -38,6 +38,7 @@ deploy_pi() {
     say "Raspberry Pi — code, dépendances, service"
     scp -q "$REPO/deploy/babyphone.service" "$PI_HOST:/tmp/babyphone.service"
     scp -q "$REPO/deploy/journald-babyphone.conf" "$PI_HOST:/tmp/journald-babyphone.conf"
+    scp -q "$REPO/deploy/watchdog.conf" "$PI_HOST:/tmp/watchdog.conf"
     ssh "$PI_HOST" bash -s <<'REMOTE'
 set -euo pipefail
 export PATH="$HOME/.local/bin:$PATH"
@@ -57,6 +58,13 @@ if ! diff -q /tmp/journald-babyphone.conf "$CONF" >/dev/null 2>&1; then
     sudo systemctl restart systemd-journald
     sudo journalctl --vacuum-size=200M >/dev/null 2>&1 || true
     echo "  plafond des journaux appliqué"
+fi
+WD=/etc/systemd/system.conf.d/watchdog.conf
+if ! diff -q /tmp/watchdog.conf "$WD" >/dev/null 2>&1; then
+    sudo mkdir -p /etc/systemd/system.conf.d
+    sudo cp /tmp/watchdog.conf "$WD"
+    sudo systemctl daemon-reexec
+    echo "  chien de garde matériel activé"
 fi
 sudo systemctl enable --quiet babyphone.service
 sudo systemctl restart babyphone.service

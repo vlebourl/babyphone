@@ -54,6 +54,16 @@ template:
         state: "{{ trigger.json.uptime_s | float(0) | round(0) }}"
         unit_of_measurement: "s"
         state_class: measurement
+      - name: "Babyphone Sous-tension"
+        unique_id: babyphone_sous_tension
+        # L'alimentation du Pi est la cause du mode de panne dominant
+        # (coupures du micro USB, ADR-0005) et elle est invisible depuis le
+        # réseau : le dispositif paraît sain jusqu'à ce qu'il décroche.
+        state: >-
+          {{ 'Oui' if trigger.json.undervoltage else
+             ('Non' if trigger.json.undervoltage is not none else 'Inconnu') }}
+        icon: >-
+          {{ 'mdi:flash-alert' if trigger.json.undervoltage else 'mdi:flash' }}
       - name: "Babyphone Activité"
         unique_id: babyphone_noisy_ratio
         # part des blocs au-dessus du seuil sur la dernière seconde
@@ -428,6 +438,25 @@ automation:
       - delay: "00:15:00"
       - action: counter.reset
         target: { entity_id: counter.babyphone_demarrages }
+
+  # ── Alimentation : un défaut matériel qu'aucun réglage ne compense ──
+  - id: babyphone_sous_tension
+    alias: Babyphone - Sous-tension de l'alimentation
+    mode: single
+    triggers:
+      - trigger: state
+        entity_id: sensor.babyphone_sous_tension
+        to: "Oui"
+        for: "00:30:00"
+    actions:
+      - action: notify.mobile_app_pixel_9_pro
+        data:
+          title: Babyphone
+          message: >-
+            Alimentation insuffisante depuis 30 min. C'est la cause connue des
+            coupures du micro : un bloc 5,1 V / 3 A et un câble court règlent
+            le problème, aucun réglage logiciel ne le compensera.
+          data: { tag: babyphone_alimentation }
 
   # ── 5. Interrupteur divergent ────────────────────────────────────────
   # Le service systemd est `enabled` : après une coupure de courant il

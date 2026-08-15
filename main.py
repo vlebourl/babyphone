@@ -9,9 +9,11 @@ from audio_source import (AlreadyRunning, MicrophoneSource,
                           acquire_single_instance_lock)
 from config import (HEARTBEAT_PERIOD, HEARTBEAT_URL, INPUT_BLOCK_TIME,
                     MIN_NOISE_DURATION, NOISE_EVENT_COUNT, NOISE_EVENT_TIMEOUT,
-                    NOISE_URL, SPEAKING_TIMEOUT, URL)
+                    NOISE_URL, OUT_OF_BAND_AFTER, OUT_OF_BAND_URL,
+                    SPEAKING_TIMEOUT, URL)
 from detection import Detection, Output, Settings, Transition
 from emitter import Heartbeat, WebhookEmitter
+from health import OutOfBandAlerter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -37,7 +39,10 @@ def main():
             calm_timeout=SPEAKING_TIMEOUT,
         )
     )
-    emitter = WebhookEmitter(URL, NOISE_URL)
+    out_of_band = OutOfBandAlerter(OUT_OF_BAND_URL, OUT_OF_BAND_AFTER)
+    if out_of_band.enabled:
+        logging.info("Canal d'alerte hors bande actif (après %ds)", OUT_OF_BAND_AFTER)
+    emitter = WebhookEmitter(URL, NOISE_URL, out_of_band=out_of_band)
     heartbeat = Heartbeat(HEARTBEAT_URL, HEARTBEAT_PERIOD)
     if heartbeat.enabled:
         logging.info("Chien de garde externe actif (période %ds)", HEARTBEAT_PERIOD)

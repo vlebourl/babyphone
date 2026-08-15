@@ -38,6 +38,12 @@ NOISE_EVENT_TIMEOUT = 1.5  # seconds between noise events
 # qui couvre ce cas. Le battement ne transporte AUCUNE donnée — ni audio, ni
 # amplitude, ni horodatage d'éveil — ce qui reste compatible avec l'ADR-0003.
 HEARTBEAT_URL = ""
+
+# Canal d'alerte hors bande (ADR-0009). Gabarit d'URL contenant {msg}, appelé
+# quand la domotique reste injoignable. Vide = désactivé. Porte des
+# identifiants : vit dans local_settings.py, jamais dans le dépôt.
+OUT_OF_BAND_URL = ""
+OUT_OF_BAND_AFTER = 180  # secondes d'injoignabilité avant de crier
 HEARTBEAT_PERIOD = 60  # secondes entre deux battements
 
 # Load local settings if available
@@ -60,5 +66,10 @@ except ImportError:
 
 try:  # l'URL du chien de garde porte un jeton : jamais dans le dépôt
     from local_settings import HEARTBEAT_URL  # noqa: F811
+except ImportError:
+    pass
+
+try:
+    from local_settings import OUT_OF_BAND_URL  # noqa: F811
 except ImportError:
     pass
