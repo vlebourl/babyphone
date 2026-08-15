@@ -27,14 +27,23 @@ Les cinq améliorations issues de l'étude du 2026-08-15 — télémétrie enric
 - [Décider la politique d'alerte quand le babyphone tombe](tickets/0004-politique-alerte-panne.md) — durcie par grilling adversarial : canal Android, armement sur l'intention, jamais sur l'état de sommeil (circulaire) — ADR-0009
 - [Implémenter les alertes de panne et l'historique de fiabilité](tickets/0005-implementer-alertes.md) — 9 automatisations, détecteurs de cécité, boucle de redémarrage **vérifiée en réel**
 
+- [Maquetter la vue « nuit dernière »](tickets/0006-maquette-vue-nuit.md) — chiffres, puis hypnogramme, puis courbe fine traçant le **pic**, puis 7 nuits
+- [Implémenter la vue « nuit dernière »](tickets/0007-implementer-vue-nuit.md) — déployée ; Lovelace passe sous Git, dernière pièce hors ADR-0007
+- [Trancher l'implémentation du passe-bande](tickets/0008-choix-passe-bande.md) — **FFT numpy** (0,87 ms) contre biquad Python (25,4 ms = 51 % du budget)
+- [Implémenter le passe-bande vocal](tickets/0009-implementer-passe-bande.md) — déployé, émergence d'un cri **+8,8 dB**, 58 Mo / 4 % CPU
+
 <!-- une ligne par ticket clos : le gist, puis zoomer le lien pour le détail -->
 
 ## Not yet specified
 
-- **Réglage fin des temporisations de l'ADR-0002** une fois le passe-bande en place : si le rapport signal/bruit s'améliore vraiment, `min_noise_duration`, `event_count` et `event_gap` deviennent probablement trop conservateurs. Impossible de trancher avant d'avoir mesuré le gain réel sur plusieurs nuits.
+- **Recalibrer la marge de 10 dB sur données filtrées.** Elle a été choisie par rejeu de données large bande où le fond était dominé par du grondement. Le rapport signal/bruit ayant gagné 8,8 dB (ADR-0010), l'optimum a probablement bougé. Le rejeu du ticket 0002 se rejoue à l'identique dès que quelques nuits filtrées sont accumulées.
+- **Réglage fin des temporisations de l'ADR-0002.** Elles compensaient un signal bruité ; avec 8,8 dB de marge en plus, `min_noise_duration` et `event_count` sont probablement trop conservateurs et coûtent de la latence pour rien.
 - **Sort du terme filaire `speaking`** : le glossaire dit *éveil*, le contrat HA dit `speaking`. Un renommage coordonné des deux tiers est possible mais son déclencheur naturel serait un changement de contrat déjà nécessaire pour une autre raison.
 - **Rétention et granularité de l'historique** : la télémétrie enrichie multiplie les séries dans TimescaleDB. À revisiter si le volume devient un sujet.
 
 ## Out of scope
 
-<!-- travail consciemment écarté de cet effort -->
+- **Notification à chaque éveil** — écartée au ticket 0004 : l'ADR-0002 existe précisément pour ne pas crier au premier bruit, et rebrancher une sonnette derrière ce filtre le contredirait.
+- **`uptime-card` comme mesure des micro-coupures** — écartée au ticket 0005 : le capteur de vivacité a 90 s de péremption et une minute de granularité, il ne peut structurellement pas montrer des coupures de 1 à 30 s.
+- **Alimentation du Raspberry Pi** (`throttled=0x50005`, sous-tension et throttling en cours) — action matérielle, hors de portée du logiciel, mais préalable réel à toute calibration fine d'alerte.
+- **Inscription à un prestataire de chien de garde externe** — le mécanisme est livré et inactif ; choisir un tiers et lui ouvrir un compte appartient à l'utilisateur.
