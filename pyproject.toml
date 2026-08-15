@@ -1,0 +1,18 @@
+[project]
+name = "babyphone"
+version = "1.0.0"
+description = "Surveillance sonore d'une chambre d'enfant : détection d'éveil par seuil adaptatif, notification de la domotique par webhooks"
+readme = "CONTEXT.md"
+license = { file = "LICENSE" }
+authors = [{ name = "Vincent Le Bourlot" }]
+# La cible d'exécution est un Raspberry Pi 3A+ sous Bookworm (Python 3.11) — voir docs/adr/0005
+requires-python = ">=3.11"
+dependencies = [
+    "pyaudio>=0.2.14",
+    "ratelimit>=2.2.1",
+    "requests>=2.32.3",
+]
+
+[tool.uv]
+# Script à plat (main.py), pas un paquet installable : uv n'installe que les dépendances
+package = false
