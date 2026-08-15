@@ -13,6 +13,7 @@ import math
 import os
 import struct
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Iterator
 
@@ -91,6 +92,55 @@ _BAND_LO = int(VOICE_BAND_LOW * INPUT_FRAMES_PER_BLOCK / RATE)
 _BAND_HI = int(VOICE_BAND_HIGH * INPUT_FRAMES_PER_BLOCK / RATE)
 
 
+# Sous-bandes de la voix (ADR-0011). Les pleurs concentrent leur énergie plus
+# haut que la parole : une fondamentale de pleur tourne autour de 400-600 Hz
+# avec des harmoniques très fortes vers 1-3 kHz, là où la parole reste plus
+# grave et plus plate.
+_SUB_BANDS = ((300, 800), (800, 2000), (2000, 4000))
+
+
+@dataclass(frozen=True)
+class Spectrum:
+    """Ce qu'un bloc audio révèle, au-delà de son seul volume."""
+
+    dbfs: float  # énergie dans la bande vocale
+    centroid_hz: float  # centre de gravité spectral : « où » se situe le son
+    low: float  # part de l'énergie en 300-800 Hz
+    mid: float  # part en 800-2000 Hz
+    high: float  # part en 2000-4000 Hz
+
+
+def _bin(hz: int) -> int:
+    return int(hz * INPUT_FRAMES_PER_BLOCK / RATE)
+
+
+def analyse(block: bytes) -> Spectrum:
+    """Analyse spectrale d'un bloc : énergie, centre de gravité, sous-bandes.
+
+    Une seule FFT sert tout : c'est la même transformée qui donnait déjà
+    l'énergie de bande (ADR-0010), on se contente d'en lire davantage. Le
+    surcoût est celui de quelques sommes sur un tableau déjà calculé.
+    """
+    if np is None or len(block) < 4:
+        return Spectrum(to_dbfs(get_rms(block)), 0.0, 0.0, 0.0, 0.0)
+
+    x = np.frombuffer(block, dtype="<i2").astype(np.float32)
+    spec = np.fft.rfft(x)
+    power = spec.real**2 + spec.imag**2
+
+    voix = power[_BAND_LO:_BAND_HI]
+    total = float(voix.sum())
+    rms = math.sqrt(2 * total) / len(x) * SHORT_NORMALIZE
+
+    if total <= 0:
+        return Spectrum(to_dbfs(rms), 0.0, 0.0, 0.0, 0.0)
+
+    freqs = np.arange(_BAND_LO, _BAND_HI) * (RATE / len(x))
+    centroid = float((freqs * voix).sum() / total)
+    parts = [float(power[_bin(lo):_bin(hi)].sum()) / total for lo, hi in _SUB_BANDS]
+    return Spectrum(to_dbfs(rms), centroid, *parts)
+
+
 def band_rms(block: bytes) -> float:
     """RMS normalisé de la seule bande vocale (ADR-0010).
 
@@ -140,11 +190,12 @@ class MicrophoneSource:
         self._stream = self._open_mic_stream()
         self._error_count = 0
 
-    def readings(self) -> Iterator[tuple[datetime, float]]:
-        """Flux infini de (instant, amplitude en dBFS), résilient aux coupures.
+    def readings(self) -> Iterator[tuple[datetime, "Spectrum"]]:
+        """Flux infini de (instant, analyse spectrale), résilient aux coupures.
 
-        L'amplitude sort en dBFS et non en RMS linéaire : c'est l'unité de
-        toute la chaîne en aval (ADR-0008).
+        L'amplitude sort en dBFS et non en RMS linéaire (ADR-0008), accompagnée
+        de la forme du spectre — de quoi distinguer une voix d'un pleur, ce
+        qu'un volume seul ne peut pas dire (ADR-0011).
         """
         while True:
             try:
@@ -162,7 +213,7 @@ class MicrophoneSource:
             # lecture réussie : le seuil de reset compte des erreurs CONSÉCUTIVES,
             # pas un cumul sur toute la vie du processus
             self._error_count = 0
-            yield datetime.now(), to_dbfs(band_rms(block))
+            yield datetime.now(), analyse(block)
 
     def close(self):
         """Libère le flux et la pile audio."""

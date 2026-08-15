@@ -15,6 +15,7 @@ from requests.adapters import HTTPAdapter
 from urllib3.util.retry import Retry
 
 from detection import Output
+from classification import classify
 from health import read_undervoltage
 
 
@@ -107,6 +108,12 @@ class WebhookEmitter:
                     "noisy_ratio": r.noisy_ratio,
                     "uptime_s": round(time.monotonic() - self._started_at, 1),
                     "undervoltage": read_undervoltage(),
+                    "centroid_hz": round(r.centroid_hz, 0),
+                    "band_low": round(r.low, 3),
+                    "band_mid": round(r.mid, 3),
+                    "band_high": round(r.high, 3),
+                    "kind": classify(r.centroid_hz, r.low, r.mid, r.high,
+                                     r.peak - r.floor).label,
                 },
                 session=self._telemetry_session,
                 timeout=TELEMETRY_TIMEOUT,

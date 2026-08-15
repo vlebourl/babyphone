@@ -61,9 +61,9 @@ def main():
 
     try:
         logging.info("Starting audio monitoring...")
-        for now, amplitude in source.readings():
+        for now, spectrum in source.readings():
             try:
-                emitter.publish(detection.feed(amplitude, now))
+                emitter.publish(detection.feed(spectrum.dbfs, now, spectrum))
                 heartbeat.beat(time.monotonic())
             except Exception:
                 logging.exception("Unexpected error in processing loop")

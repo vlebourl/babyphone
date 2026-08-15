@@ -64,6 +64,37 @@ template:
              ('Non' if trigger.json.undervoltage is not none else 'Inconnu') }}
         icon: >-
           {{ 'mdi:flash-alert' if trigger.json.undervoltage else 'mdi:flash' }}
+      # Nature du son (ADR-0011) : la forme du spectre, pas le volume.
+      # L'étiquette ne décide de rien — la surveillance reste pilotée par
+      # l'amplitude seule ; ces capteurs qualifient et rendent calibrable.
+      - name: "Babyphone Nature du son"
+        unique_id: babyphone_nature_son
+        state: "{{ trigger.json.kind | default('calme') }}"
+        icon: >-
+          {% set k = trigger.json.kind | default('calme') %}
+          {{ {'calme': 'mdi:sleep', 'voix': 'mdi:account-voice',
+              'pleurs': 'mdi:emoticon-cry-outline', 'cri': 'mdi:alert-octagram',
+              'bruit': 'mdi:door'}[k] | default('mdi:help-circle') }}
+      - name: "Babyphone Centre spectral"
+        unique_id: babyphone_centroid
+        state: "{{ trigger.json.centroid_hz | float(0) | round(0) }}"
+        unit_of_measurement: "Hz"
+        state_class: measurement
+      - name: "Babyphone Bande grave"
+        unique_id: babyphone_band_low
+        state: "{{ (trigger.json.band_low | float(0) * 100) | round(0) }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+      - name: "Babyphone Bande médium"
+        unique_id: babyphone_band_mid
+        state: "{{ (trigger.json.band_mid | float(0) * 100) | round(0) }}"
+        unit_of_measurement: "%"
+        state_class: measurement
+      - name: "Babyphone Bande aiguë"
+        unique_id: babyphone_band_high
+        state: "{{ (trigger.json.band_high | float(0) * 100) | round(0) }}"
+        unit_of_measurement: "%"
+        state_class: measurement
       - name: "Babyphone Activité"
         unique_id: babyphone_noisy_ratio
         # part des blocs au-dessus du seuil sur la dernière seconde

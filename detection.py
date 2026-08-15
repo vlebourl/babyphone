@@ -20,7 +20,7 @@ Invariants d'interface :
 
 from bisect import bisect_left, insort
 from collections import deque
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime, timedelta
 from statistics import mean
 
@@ -70,6 +70,12 @@ class NoiseReport:
     peak: float = 0.0  # bloc le plus fort — ce que le détecteur a réellement vu
     floor: float = 0.0  # bloc le plus faible — le vrai fond sonore, non lissé
     noisy_ratio: float = 0.0  # part des blocs au-dessus du seuil, dans [0, 1]
+    # Forme spectrale du bloc le plus fort de la fenêtre : c'est lui qui porte
+    # l'information sur la NATURE du son (ADR-0011), là où la moyenne la dilue.
+    centroid_hz: float = 0.0
+    low: float = 0.0
+    mid: float = 0.0
+    high: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -100,13 +106,17 @@ class Detection:
         self._last_event_at = _EPOCH
         self._awake = False
         self._last_report_at: "datetime | None" = None
+        # spectres de la fenêtre de télémétrie, appariés aux amplitudes
+        self._spectra: deque = deque(maxlen=int(2.0 / settings.block_time))
 
     @property
     def threshold(self) -> float:
         """Seuil courant (médiane de la fenêtre + marge)."""
         return self._threshold
 
-    def feed(self, amplitude: float, now: datetime) -> Output:
+    def feed(self, amplitude: float, now: datetime, spectrum=None) -> Output:
+        """`spectrum` est optionnel : la décision d'éveil n'en dépend pas, il
+        n'accompagne la télémétrie que pour qualifier la nature du son."""
         s = self._s
         # Le Pi n'a pas d'horloge RTC : au premier accrochage NTP après le boot,
         # l'heure peut reculer. Des repères dans le futur rendraient la détection
@@ -120,6 +130,7 @@ class Detection:
             evicted = self._amplitudes[0]  # va sortir de la fenêtre
             del self._sorted_amplitudes[bisect_left(self._sorted_amplitudes, evicted)]
         self._amplitudes.append(amplitude)
+        self._spectra.append((amplitude, spectrum))
         insort(self._sorted_amplitudes, amplitude)
         self._threshold = self._median() + s.threshold_offset
 
@@ -180,10 +191,19 @@ class Detection:
         self._last_report_at = now
         recent = list(self._amplitudes)[-blocks:]
         noisy = sum(1 for a in recent if a > self._threshold)
-        return NoiseReport(
+        report = NoiseReport(
             amplitude=mean(recent),
             threshold=self._threshold,
             peak=max(recent),
             floor=min(recent),
             noisy_ratio=noisy / len(recent),
         )
+        # on retient la forme du bloc le plus fort, pas d'une moyenne : c'est
+        # l'instant du cri qui renseigne, pas la seconde qui l'entoure
+        fort = max((p for p in self._spectra if p[1] is not None),
+                   key=lambda p: p[0], default=None)
+        if fort is not None:
+            sp = fort[1]
+            report = replace(report, centroid_hz=sp.centroid_hz,
+                             low=sp.low, mid=sp.mid, high=sp.high)
+        return report
