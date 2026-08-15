@@ -398,8 +398,18 @@ VUE = {
 
 
 def main():
+    """Écrit la vue. Rend 10 si le fichier a changé, 0 sinon.
+
+    Ce code de sortie compte : Home Assistant charge les tableaux de bord
+    Lovelace en mémoire au démarrage et ne relit jamais `.storage` ensuite
+    — `reload_all` ne les recharge pas non plus. Une écriture sur disque
+    reste donc invisible, et HA écrase même le fichier à sa prochaine
+    sauvegarde. Seul un redémarrage rend la vue effective, et le
+    déploiement s'en sert pour ne redémarrer QUE lorsque c'est nécessaire.
+    """
     with open(PATH) as f:
         data = json.load(f)
+    avant_json = json.dumps(data, sort_keys=True)
     views = data["data"]["config"]["views"]
 
     # la sous-vue système a été fusionnée : on la retire si elle traîne encore
@@ -419,9 +429,14 @@ def main():
         views.insert(idx + 1, VUE)
         print(f"  vue « babyphone » insérée (position {idx + 1})")
 
+    if json.dumps(data, sort_keys=True) == avant_json:
+        print("  vue déjà à jour, aucun redémarrage nécessaire")
+        return 0
+
     with open(PATH, "w") as f:
         json.dump(data, f, indent=2, ensure_ascii=False)
+    return 10
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
