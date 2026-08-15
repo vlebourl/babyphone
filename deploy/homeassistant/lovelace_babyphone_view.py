@@ -52,6 +52,19 @@ DERNIER_REVEIL = (
 )
 
 
+# Cet interrupteur ARRÊTE le babyphone : une automatisation le suit et appelle
+# `systemctl stop` sur le Pi. Un appui accidentel — en faisant défiler la page
+# sur mobile — a déjà coupé la surveillance huit heures durant le 2026-08-15.
+# La confirmation est donc obligatoire, y compris pour armer : le geste doit
+# rester délibéré dans les deux sens.
+BASCULE_SURVEILLANCE = {
+    "action": "toggle",
+    "confirmation": {
+        "text": "Basculer la surveillance de la chambre de Lenaïc ?",
+    },
+}
+
+
 def tuile(entity, primary, secondary, icon, color, tap=None):
     """Tuile mushroom verticale — la brique de tous les bandeaux de chiffres."""
     c = {
@@ -145,7 +158,7 @@ ETAT_ACTUEL = {
                     "mdi:shield-home",
                     "{{ 'amber' if is_state('input_boolean.babyphone_on_off', 'on')"
                     " else 'disabled' }}",
-                    {"action": "toggle"},
+                    BASCULE_SURVEILLANCE,
                 ),
                 tuile(
                     "sensor.babyphone_dernier_reveil",
@@ -314,7 +327,7 @@ SANTE = {
                       "Surveillance", "mdi:shield-home",
                       "{{ 'amber' if is_state('input_boolean.babyphone_on_off', 'on')"
                       " else 'disabled' }}",
-                      {"action": "toggle"}),
+                      BASCULE_SURVEILLANCE),
                 tuile("input_boolean.babyphone_alerte_acquittee",
                       "{{ 'Acquittée' if"
                       " is_state('input_boolean.babyphone_alerte_acquittee', 'on')"
