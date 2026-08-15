@@ -23,6 +23,16 @@ MIN_NOISE_DURATION = 0.11  # minimum noise duration to trigger an event
 NOISE_EVENT_COUNT = 3  # number of noise events before considering speaking
 NOISE_EVENT_TIMEOUT = 1.5  # seconds between noise events
 
+# Chien de garde externe (ADR-0009). Vide = désactivé.
+# Une alerte hébergée par le système surveillé ne peut pas signaler sa propre
+# mort : si Home Assistant, le Wi-Fi ou le lien Internet tombent, personne
+# n'est prévenu et le silence se confond avec « tout va bien ». Un tiers qui
+# attend un battement régulier et alerte quand il cesse est le seul montage
+# qui couvre ce cas. Le battement ne transporte AUCUNE donnée — ni audio, ni
+# amplitude, ni horodatage d'éveil — ce qui reste compatible avec l'ADR-0003.
+HEARTBEAT_URL = ""
+HEARTBEAT_PERIOD = 60  # secondes entre deux battements
+
 # Load local settings if available
 try:
     from local_settings import NOISE_URL, URL
@@ -40,3 +50,8 @@ except ImportError:
         logging.warning("local_settings.py not found, using default API endpoints")
         URL = DEFAULT_URL
         NOISE_URL = DEFAULT_NOISE_URL
+
+try:  # l'URL du chien de garde porte un jeton : jamais dans le dépôt
+    from local_settings import HEARTBEAT_URL  # noqa: F811
+except ImportError:
+    pass

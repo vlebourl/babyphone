@@ -135,3 +135,41 @@ class WebhookEmitter:
         except requests.exceptions.RequestException as e:
             logging.error("API request failed (%s): %s", _redact(url), e)
             return None
+
+
+class Heartbeat:
+    """Battement vers un chien de garde externe (ADR-0009).
+
+    Ne transporte aucune donnée : un GET vide, périodique. C'est le tiers qui
+    alerte quand le battement cesse — donc il couvre les pannes que la
+    domotique ne peut pas signaler, la sienne comprise.
+
+    Inactif si l'URL est vide, ce qui est le cas par défaut : activer un
+    service externe est une décision de l'utilisateur, pas du code.
+    """
+
+    def __init__(self, url: str, period: float, session=None):
+        self._url = url
+        self._period = period
+        self._session = session or create_session(total=0, backoff_factor=0)
+        self._last = None
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self._url)
+
+    def beat(self, now: float) -> bool:
+        """Envoie un battement si la période est écoulée. Rend True si envoyé."""
+        if not self.enabled:
+            return False
+        if self._last is not None and now - self._last < self._period:
+            return False
+        self._last = now
+        try:
+            # timeout court : le battement ne doit jamais retarder l'écoute
+            self._session.get(self._url, timeout=(2, 3))
+        except requests.exceptions.RequestException as e:
+            # un battement perdu est sans conséquence : le tiers tolère une
+            # période de grâce, et le suivant repart dans une minute
+            logging.debug("Heartbeat failed: %s", e)
+        return True

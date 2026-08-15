@@ -143,3 +143,43 @@ def test_un_echec_reseau_ne_remonte_pas_dans_la_boucle():
     emitter.publish(
         Output(transitions=(Transition(awake=True, at=T, noise_duration=0.15),))
     )
+
+
+def test_le_chien_de_garde_est_inactif_sans_url():
+    # Activer un service externe est une décision de l'utilisateur : par
+    # défaut le battement ne part nulle part et ne coûte rien.
+    from emitter import Heartbeat
+
+    hb = Heartbeat("", 60)
+    assert hb.enabled is False
+    assert hb.beat(1000.0) is False
+
+
+def test_le_chien_de_garde_respecte_sa_periode():
+    from emitter import Heartbeat
+
+    class Counting:
+        def __init__(self):
+            self.gets = 0
+
+        def get(self, url, timeout=None):
+            self.gets += 1
+
+    s = Counting()
+    hb = Heartbeat("http://hc/ping", 60, session=s)
+    assert hb.beat(1000.0) is True       # premier battement
+    assert hb.beat(1030.0) is False      # trop tôt
+    assert hb.beat(1061.0) is True       # période écoulée
+    assert s.gets == 2
+
+
+def test_un_battement_perdu_ne_remonte_pas_dans_la_boucle():
+    from emitter import Heartbeat
+
+    class Exploding:
+        def get(self, url, timeout=None):
+            raise requests.exceptions.ConnectionError("tiers injoignable")
+
+    import requests
+    hb = Heartbeat("http://hc/ping", 60, session=Exploding())
+    assert hb.beat(1000.0) is True  # ne doit pas lever

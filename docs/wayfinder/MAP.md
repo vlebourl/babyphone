@@ -24,6 +24,9 @@ Les cinq améliorations issues de l'étude du 2026-08-15 — télémétrie enric
 
 - [Passer la détection en dBFS](tickets/0003-detection-dbfs.md) — conversion dans la source audio, `Detection` inchangée ; capteurs HA enfin honnêtes en dB (ADR-0008)
 
+- [Décider la politique d'alerte quand le babyphone tombe](tickets/0004-politique-alerte-panne.md) — durcie par grilling adversarial : canal Android, armement sur l'intention, jamais sur l'état de sommeil (circulaire) — ADR-0009
+- [Implémenter les alertes de panne et l'historique de fiabilité](tickets/0005-implementer-alertes.md) — 9 automatisations, détecteurs de cécité, boucle de redémarrage **vérifiée en réel**
+
 <!-- une ligne par ticket clos : le gist, puis zoomer le lien pour le détail -->
 
 ## Not yet specified

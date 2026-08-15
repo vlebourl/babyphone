@@ -2,14 +2,16 @@
 
 import logging
 import sys
+import time
 from datetime import datetime
 
 from audio_source import (AlreadyRunning, MicrophoneSource,
                           acquire_single_instance_lock)
-from config import (INPUT_BLOCK_TIME, MIN_NOISE_DURATION, NOISE_EVENT_COUNT,
-                    NOISE_EVENT_TIMEOUT, NOISE_URL, SPEAKING_TIMEOUT, URL)
+from config import (HEARTBEAT_PERIOD, HEARTBEAT_URL, INPUT_BLOCK_TIME,
+                    MIN_NOISE_DURATION, NOISE_EVENT_COUNT, NOISE_EVENT_TIMEOUT,
+                    NOISE_URL, SPEAKING_TIMEOUT, URL)
 from detection import Detection, Output, Settings, Transition
-from emitter import WebhookEmitter
+from emitter import Heartbeat, WebhookEmitter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,6 +38,9 @@ def main():
         )
     )
     emitter = WebhookEmitter(URL, NOISE_URL)
+    heartbeat = Heartbeat(HEARTBEAT_URL, HEARTBEAT_PERIOD)
+    if heartbeat.enabled:
+        logging.info("Chien de garde externe actif (période %ds)", HEARTBEAT_PERIOD)
     source = MicrophoneSource()
 
     # Signale le (re)démarrage : état calme explicite vers la domotique
@@ -54,6 +59,7 @@ def main():
         for now, amplitude in source.readings():
             try:
                 emitter.publish(detection.feed(amplitude, now))
+                heartbeat.beat(time.monotonic())
             except Exception:
                 logging.exception("Unexpected error in processing loop")
     except KeyboardInterrupt:
