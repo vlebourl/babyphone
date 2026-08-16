@@ -76,6 +76,11 @@ class NoiseReport:
     low: float = 0.0
     mid: float = 0.0
     high: float = 0.0
+    # Écart du pic au FOND DE LA PIÈCE (médiane sur deux minutes), et non au
+    # creux de la même seconde : mesurée sur une seconde, la simple respiration
+    # de l'ambiance dépasse déjà 6 dB, ce qui faisait osciller l'étiquette entre
+    # « calme » et « voix » à chaque rapport.
+    emergence_db: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -191,12 +196,14 @@ class Detection:
         self._last_report_at = now
         recent = list(self._amplitudes)[-blocks:]
         noisy = sum(1 for a in recent if a > self._threshold)
+        pic = max(recent)
         report = NoiseReport(
             amplitude=mean(recent),
             threshold=self._threshold,
-            peak=max(recent),
+            peak=pic,
             floor=min(recent),
             noisy_ratio=noisy / len(recent),
+            emergence_db=pic - self._median(),
         )
         # on retient la forme du bloc le plus fort, pas d'une moyenne : c'est
         # l'instant du cri qui renseigne, pas la seconde qui l'entoure

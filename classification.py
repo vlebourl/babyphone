@@ -20,8 +20,12 @@ recalibrer sans redéployer de code.
 from dataclasses import dataclass
 
 # Émergence minimale au-dessus du fond pour qu'un son mérite une étiquette.
-# En dessous, c'est l'ambiance de la pièce, pas un événement.
-EMERGENCE_MIN_DB = 6.0
+# Calée sur la MARGE DE DÉTECTION (ADR-0008) : en deçà, le bloc n'est même pas
+# jugé bruyant par la machine à états. Aligner les deux évite qu'un son soit
+# nommé « voix » alors que la surveillance le considère comme du silence — et
+# supprime le clignotement calme/voix à chaque seconde qui rendait l'étiquette
+# illisible sur le tableau de bord.
+EMERGENCE_MIN_DB = 10.0
 
 # Un cri se reconnaît d'abord à sa violence, quelle que soit sa couleur.
 EMERGENCE_CRI_DB = 22.0

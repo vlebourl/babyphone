@@ -378,9 +378,26 @@ NUIT = {
             "custom_fields": {"body": NUIT_JS},
         },
         {
+            # LA carte qui répond à « quand Lenaïc parle-t-il ? ». Une frise
+            # d'états : chaque bande colorée est une période, et son étiquette
+            # dit la nature du son. Une tuile ne dit que l'instant présent ;
+            # c'est cette frise qui donne l'histoire de la nuit.
+            "type": "history-graph",
+            "title": "Quand Lenaïc s'est manifesté",
+            "hours_to_show": 14,
+            "show_names": True,
+            "entities": [
+                {"entity": NATURE, "name": "Nature du son"},
+                {"entity": EVEIL, "name": "Réveil"},
+            ],
+            "card_mod": {"style": (
+                "ha-card {\n  margin: 0;\n  padding: 4px 8px 0;\n"
+                "  border: none;\n  background: transparent;\n  box-shadow: none;\n}\n")},
+        },
+        {
             # Vraie carte : on ne simule pas un graphe en HTML (règle n°2).
             "type": "custom:apexcharts-card",
-            "header": {"show": True, "title": "Éveils de la nuit", "show_states": False},
+            "header": {"show": True, "title": "Intensité des éveils", "show_states": False},
             "graph_span": "14h",
             "span": {"start": "day", "offset": "-4h"},
             "apex_config": {
