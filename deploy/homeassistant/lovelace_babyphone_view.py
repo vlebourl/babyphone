@@ -406,6 +406,28 @@ NUIT = {
                 "  border: none;\n  background: transparent;\n  box-shadow: none;\n}\n")},
         },
         {
+            # Une bande colorée ne dit rien sans sa clé de lecture : la frise
+            # de Home Assistant ne nomme ses états qu'au survol, inutilisable
+            # sur mobile. La légende est statique, donc sans coût de calcul.
+            "type": "custom:button-card",
+            "name": "Anima Babyphone - legende",
+            **NU,
+            "tap_action": {"action": "none"},
+            "extra_styles": """
+              .bp-leg { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 2px 14px 12px; }
+              .bp-leg span { display: inline-flex; align-items: center; gap: 6px; font-size: 11px; color: var(--secondary-text-color); }
+              .bp-leg i { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+            """,
+            "custom_fields": {"body": (
+                '[[[ return `<div class="bp-leg">'
+                '<span><i style="background:%s"></i>calme</span>'
+                '<span><i style="background:%s"></i>voix</span>'
+                '<span><i style="background:%s"></i>pleurs</span>'
+                '<span><i style="background:%s"></i>cri</span>'
+                '<span><i style="background:#64748b"></i>bruit</span>'
+                '</div>`; ]]]' % (CALME_V, VOIX_V, PLEURS_V, CRI_V))},
+        },
+        {
             # Vraie carte : on ne simule pas un graphe en HTML (règle n°2).
             "type": "custom:apexcharts-card",
             "header": {"show": True, "title": "Intensité des éveils", "show_states": False},
