@@ -1,18 +1,3 @@
 {
-  "mcpServers": {
-    "stitch": {
-      "type": "stdio",
-      "command": "/opt/homebrew/bin/npx",
-      "args": [
-        "-y",
-        "@_davideast/stitch-mcp",
-        "proxy"
-      ],
-      "env": {
-        "PATH": "/opt/homebrew/bin:/usr/bin:/bin",
-        "npm_config_cache": "/Users/vlb/.cache/npm-stitch",
-        "STITCH_API_KEY": "${STITCH_API_KEY}"
-      }
-    }
-  }
+  "mcpServers": {}
 }
