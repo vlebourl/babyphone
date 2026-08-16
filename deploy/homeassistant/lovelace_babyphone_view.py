@@ -98,8 +98,13 @@ TUILE_CSS = """
 """
 
 
-def tuile(entity, titre, legende, teinte, corps_js):
-    """Tuile acoustique : un vrai enfant du grid, avec sa propre cible tactile."""
+def tuile(entity, titre, legende, teinte, corps_js, couleur_dynamique=False):
+    """Tuile acoustique : un vrai enfant du grid, avec sa propre cible tactile.
+
+    `couleur_dynamique` laisse le JS choisir la teinte de la valeur — la
+    maquette colore le mot « pleurs » ou « cri » lui-même, ce qui rend la
+    tuile lisible sans lire l'étiquette.
+    """
     return {
         "type": "custom:button-card",
         "name": f"Anima Babyphone - {titre.lower()}",
@@ -114,7 +119,8 @@ def tuile(entity, titre, legende, teinte, corps_js):
             <div class="v"{{style}}>${{v}}</div>
             <div class="m">{legende}</div>
           </div>`;
-        ]]]""".replace("{style}", "")},
+        ]]]""".replace("${STYLE}",
+                       ' style="color:${teinte}"' if couleur_dynamique else "")},
     }
 
 
@@ -305,7 +311,12 @@ SURVEILLANCE = {
                 tuile_db(FOND, "Fond sonore", "référence ambiante de la pièce", CALME_V),
                 tuile(NATURE, "Son détecté", "signature spectrale", INFO_CLAIR,
                       "const raw = String(entity?.state || 'unknown').toLowerCase();"
-                      " const v = ['unknown','unavailable'].includes(raw) ? '—' : raw;"),
+                      " const v = ['unknown','unavailable'].includes(raw) ? '—' : raw;"
+                      " const teinte = raw.includes('cri') ? '%s'"
+                      " : (raw.includes('pleur') ? '%s'"
+                      " : (raw.includes('voix') ? '%s'"
+                      " : (raw.includes('bruit') ? '#64748b' : '%s')));" % (CRI_V, PLEURS_V, VOIX_V, CALME_V),
+                      couleur_dynamique=True),
             ],
         },
         {
@@ -520,6 +531,8 @@ VUE = {
     "cards": [],
     "sections": [
         {"type": "grid", "cards": [SURVEILLANCE]},
+        # La frise est « la carte la plus importante » de la maquette : elle
+        # passe donc avant les chiffres de la nuit, pas après.
         {"type": "grid", "cards": [NUIT]},
         {"type": "grid", "cards": [TELEMETRIE]},
         {"type": "grid", "cards": [TENDANCES]},
