@@ -10,6 +10,15 @@ gravité spectral haut ; la parole reste plus grave et mieux répartie ; un choc
 est bref et large bande, donc son centre de gravité tombe entre les deux sans
 que l'énergie se concentre dans le médium.
 
+**Le centre de gravité ne suffit jamais à déclarer un pleur.** Les consonnes
+sifflantes de la parole — « ch », « s », « f » — ont un centre de gravité très
+haut, souvent au-dessus de 2 kHz, avec presque toute leur énergie dans l'aigu et
+un médium famélique. Un pleur, lui, charge le médium : ce sont ses harmoniques
+qui le rendent perçant. C'est donc la part de médium, et elle seule, qui
+distingue les deux. Mesuré le 2026-08-16 : une lecture d'histoire à voix haute
+produisait 4,3 fausses étiquettes « pleurs » par minute, contre zéro pendant le
+silence qui précédait.
+
 Les seuils ci-dessous sont un **premier jeu**, posé sur la littérature acoustique
 et vérifié sur signaux de synthèse. Ils demandent une calibration sur plusieurs
 nuits réelles avant d'être tenus pour justes — d'où la publication des grandeurs
@@ -30,12 +39,14 @@ EMERGENCE_MIN_DB = 10.0
 # Un cri se reconnaît d'abord à sa violence, quelle que soit sa couleur.
 EMERGENCE_CRI_DB = 22.0
 
-# Frontières de centre de gravité spectral, en hertz.
+# Frontière de centre de gravité spectral, en hertz.
 CENTROID_VOIX_HZ = 900.0  # en dessous : fondamentale grave, plutôt de la voix
-CENTROID_PLEUR_HZ = 1800.0  # au-dessus : énergie très haute, plutôt un pleur
 
 # Part minimale d'énergie dans le médium (800–2000 Hz) pour un pleur : c'est là
-# que vivent les harmoniques qui rendent un pleur perçant.
+# que vivent les harmoniques qui rendent un pleur perçant. C'est le SEUL
+# discriminant du pleur : un centre de gravité haut ne suffit pas, parce qu'une
+# consonne sifflante en a un aussi (voir la note sur les sifflantes en tête de
+# module).
 MID_PLEUR = 0.30
 
 # Une voix humaine est harmonique : sa fondamentale est toujours accompagnée de
@@ -82,7 +93,7 @@ def classify(centroid_hz: float, low: float, mid: float, high: float,
             return Kind(BRUIT, emergence_db, centroid_hz)
         return Kind(VOIX, emergence_db, centroid_hz)
 
-    if centroid_hz >= CENTROID_PLEUR_HZ or mid >= MID_PLEUR:
+    if mid >= MID_PLEUR:
         return Kind(PLEURS, emergence_db, centroid_hz)
 
     # Assez fort pour compter, mais ne ressemble à aucune voix : porte, meuble,

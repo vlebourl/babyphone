@@ -23,9 +23,25 @@ def test_un_spectre_haut_et_un_medium_charge_sont_des_pleurs():
     assert k.label == PLEURS
 
 
-def test_un_centre_de_gravite_tres_haut_suffit_pour_des_pleurs():
+def test_un_centre_de_gravite_tres_haut_ne_suffit_pas_pour_des_pleurs():
+    # Ce test affirmait l'inverse jusqu'au 2026-08-16. Il avait été écrit sur
+    # signaux de synthèse, comme l'annonçait l'ADR-0011 ; la première nuit de
+    # données réelles l'a contredit. Un spectre haut au médium pauvre est une
+    # sifflante, pas un pleur.
     k = classify(2200, 0.1, 0.2, 0.7, emergence_db=15)
-    assert k.label == PLEURS
+    assert k.label != PLEURS
+
+
+def test_une_sifflante_de_parole_n_est_pas_un_pleur():
+    # Valeurs relevées le 2026-08-16 pendant une lecture d'histoire à voix
+    # haute, chambre de Lenaïc : centre de gravité très haut mais médium
+    # famélique. C'est la signature d'une consonne sifflante (« ch », « s »,
+    # « f »), pas d'un pleur — un pleur charge le médium, c'est ce que dit
+    # MID_PLEUR. Ce soir-là, 51 trames de ce type ont été étiquetées
+    # « pleurs » ou « cri » en 11 minutes de lecture, contre zéro pendant les
+    # 11 minutes de silence qui précédaient.
+    k = classify(2548, 0.13, 0.15, 0.72, emergence_db=16.7)
+    assert k.label != PLEURS
 
 
 def test_tres_fort_et_aigu_c_est_un_cri():
