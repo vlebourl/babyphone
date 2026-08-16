@@ -114,7 +114,7 @@ class WebhookEmitter:
                     "band_high": round(r.high, 3),
                     "emergence_db": round(r.emergence_db, 1),
                     "kind": classify(r.centroid_hz, r.low, r.mid, r.high,
-                                     r.emergence_db).label,
+                                     r.emergence_db, r.noisy_ratio).label,
                 },
                 session=self._telemetry_session,
                 timeout=TELEMETRY_TIMEOUT,

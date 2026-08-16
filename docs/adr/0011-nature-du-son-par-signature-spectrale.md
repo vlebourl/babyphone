@@ -12,11 +12,15 @@ Aucune FFT supplémentaire : c'est la même transformée qui donnait déjà l'é
 
 La forme retenue est celle du **bloc le plus fort** de la fenêtre de télémétrie, pas une moyenne : c'est l'instant du cri qui renseigne, pas la seconde qui l'entoure.
 
-## Deux règles qui portent l'essentiel
+## Trois règles qui portent l'essentiel
 
 **Un cri est fort *et* aigu.** La conjonction compte : sans elle, tout choc violent deviendrait un cri.
 
 **Une voix est harmonique.** Sa fondamentale s'accompagne toujours de partiels qui débordent dans le médium. Une énergie massée à plus de 85 % dans le grave, sans ce prolongement, n'est pas quelqu'un — c'est un meuble, un pas, une porte. Cette règle seule évite le faux positif le plus gênant : attribuer à l'enfant un bruit de maison.
+
+**Un son attribué à l'enfant doit durer.** Une voix, un pleur, un cri s'étalent sur plusieurs blocs ; un impact tient dans un seul. En deçà de 0,15 s au-dessus du seuil — trois blocs sur les vingt d'une fenêtre — le son est nommé « bruit », quelle que soit sa violence.
+
+Cette troisième règle manquait à la première version, et l'observation l'a imposée. Le 16 août 2026 à 20 h 51, alors que l'enfant n'avait pas pleuré de la soirée, un « cri » a été signalé : un unique bloc à 30 dB au-dessus du fond, centroïde à 2442 Hz, activité mesurée à 5 % — soit un bloc sur vingt. Un jouet tombé, ou un choc sur le lit. La classification étiquetait alors le bloc le plus fort de la fenêtre sans regarder s'il était seul, là où l'[ADR-0002](0002-eveil-confirme-par-accumulation.md) exige depuis toujours une durée minimale pour la décision d'éveil. Les deux chemins appliquent désormais le même principe.
 
 ## Conséquences
 

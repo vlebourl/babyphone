@@ -81,3 +81,32 @@ def test_l_etiquette_transporte_ce_qui_l_a_justifiee():
 def test_aucune_entree_ne_fait_planter_l_etiquetage(centroid, low, mid, high, em):
     assert classify(centroid, low, mid, high, em).label in {
         CALME, VOIX, PLEURS, CRI, BRUIT}
+
+
+# --- Durée : un son attribué à l'enfant doit s'étaler (ADR-0011) ---
+
+def test_un_transitoire_fort_et_aigu_est_du_bruit_pas_un_cri():
+    """Le faux positif observé en production le 2026-08-16 à 20:51:12.
+
+    Un seul bloc à 30 dB au-dessus du fond, centroïde 2442 Hz, activité 5 %
+    — un objet qui tombe. Sans critère de durée, c'était étiqueté « cri »
+    alors que l'enfant n'avait pas pleuré de la soirée.
+    """
+    k = classify(2442, 0.10, 0.23, 0.67, emergence_db=30.4, noisy_ratio=0.05)
+    assert k.label == BRUIT
+
+
+def test_un_cri_soutenu_reste_un_cri():
+    k = classify(1700, 0.15, 0.5, 0.35, emergence_db=25, noisy_ratio=0.6)
+    assert k.label == CRI
+
+
+def test_des_pleurs_soutenus_restent_des_pleurs():
+    k = classify(1600, 0.2, 0.55, 0.25, emergence_db=15, noisy_ratio=0.45)
+    assert k.label == PLEURS
+
+
+def test_une_voix_brieve_mais_pas_ponctuelle_reste_une_voix():
+    # Un mot dure ~0,2 s : au-dessus du seuil de durée, donc bien une voix.
+    k = classify(700, 0.75, 0.2, 0.05, emergence_db=12, noisy_ratio=0.25)
+    assert k.label == VOIX

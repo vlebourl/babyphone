@@ -49,6 +49,15 @@ CENTROID_VOIX_HZ = 900.0  # en dessous : fondamentale grave, plutôt de la voix
 # module).
 MID_PLEUR = 0.30
 
+# Un son attribué à l'enfant doit DURER. L'ADR-0002 filtre déjà les transitoires
+# pour la décision d'éveil — une salve doit couvrir au moins 0,11 s — mais la
+# classification n'avait pas son équivalent : elle étiquetait le bloc le plus
+# fort de la fenêtre, sans regarder s'il était seul. Un objet qui tombe (50 ms,
+# 30 dB au-dessus du fond, spectre aigu) devenait donc un « cri ».
+# 0,15 s sur une fenêtre d'une seconde, soit 3 blocs sur 20 : même ordre de
+# grandeur que la durée minimale d'un événement de bruit.
+DUREE_MIN_RATIO = 0.15
+
 # Une voix humaine est harmonique : sa fondamentale est toujours accompagnée de
 # partiels qui débordent dans le médium. Une énergie massée presque entièrement
 # dans le grave, sans ce prolongement, n'est pas une voix — c'est un choc, un
@@ -73,14 +82,22 @@ class Kind:
 
 
 def classify(centroid_hz: float, low: float, mid: float, high: float,
-             emergence_db: float) -> Kind:
-    """Étiquette un son à partir de sa forme spectrale et de son émergence.
+             emergence_db: float, noisy_ratio: float = 1.0) -> Kind:
+    """Étiquette un son à partir de sa forme spectrale, de son émergence et de sa durée.
 
     `low`, `mid`, `high` sont les parts d'énergie des trois sous-bandes, de
     somme 1. `emergence_db` est l'écart entre le son et le fond de la pièce.
+    `noisy_ratio` est la part de la fenêtre passée au-dessus du seuil : c'est
+    la mesure de durée qui sépare une voix d'un choc.
     """
     if emergence_db < EMERGENCE_MIN_DB:
         return Kind(CALME, emergence_db, centroid_hz)
+
+    # Fort mais fugace : un choc, une porte, un jouet qui tombe. Une voix, un
+    # pleur ou un cri s'étalent sur plusieurs blocs ; un impact tient dans un
+    # seul. On le nomme « bruit » plutôt que de l'attribuer à l'enfant.
+    if noisy_ratio < DUREE_MIN_RATIO:
+        return Kind(BRUIT, emergence_db, centroid_hz)
 
     # Très fort ET aigu : un cri. La conjonction compte — un choc violent est
     # fort mais son énergie ne se concentre pas dans le haut du spectre.
