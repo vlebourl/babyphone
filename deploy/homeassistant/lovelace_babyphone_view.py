@@ -1,27 +1,25 @@
 #!/usr/bin/env python3
 """Tableau de bord Babyphone — source de vérité (ADR-0007).
 
-Une seule vue, cinq sections, du plus urgent au plus technique : ce qui se
-passe maintenant, la nuit écoulée, les tendances, la santé du dispositif,
-puis la télémétrie brute. Un parent s'arrête après la troisième ; on
-descend jusqu'aux deux dernières quand quelque chose cloche.
+Suit le **modèle maison** transmis par Anima (docs/design/modele-cartes-anima.md) :
 
-Lovelace vit dans le stockage interne de Home Assistant, pas en YAML. La
-vue est publiée par l'**API websocket** `lovelace/save_config` — la même
-que l'interface utilise quand on édite une carte. Écrire directement dans
-`.storage` ne marche pas : Home Assistant charge les tableaux de bord en
-mémoire au démarrage, ne relit jamais le fichier ensuite, et finit par
-l'écraser. Passer par l'API met à jour la mémoire ET le disque, sans
-redémarrage.
+- un seul `custom:stack-in-card` vertical par bloc, qui est le seul cadre ;
+- un hero `custom:button-card` transparent, rendu en HTML via `custom_fields` ;
+- des tuiles qui sont de **vrais enfants** `custom:button-card` dans un `grid`,
+  donc une tuile = une cible tactile = un `tap_action` ;
+- jamais de `button-card` imbriqué dans le HTML d'un `custom_fields` — c'est le
+  motif qui avait produit les icônes géantes sur la carte G6 ;
+- jamais de second cadre (bordure/ombre) à l'intérieur du `stack-in-card` ;
+- les graphes restent de **vraies cartes** HA, on ne les simule pas en HTML.
 
-Client websocket écrit sur la bibliothèque standard : le conteneur SSH de
-Home Assistant n'a ni `websockets` ni `aiohttp`, et on n'installe rien
-chez l'hôte pour un script de déploiement.
-
-Déployé et exécuté par deploy/deploy.sh.
+Publication par l'API websocket `lovelace/config/save` : écrire dans `.storage`
+ne marche pas (Home Assistant garde sa copie mémoire et finit par l'écraser).
+Une sauvegarde horodatée de la configuration précédente est déposée sur l'hôte
+avant toute écriture.
 """
 
 import base64
+import datetime
 import hashlib
 import json
 import os
@@ -30,172 +28,357 @@ import struct
 
 WS_HOST, WS_PORT, WS_PATH = "supervisor", 80, "/core/websocket"
 DASHBOARD = "lovelace-mobile"
+BACKUP_DIR = "/config/lovelace_backups"
 
-# Palette : un bleu calme pour le signal, un ambre pour le seuil, un rouge
-# réservé aux seules situations qui demandent une action.
-BLEU, BLEU_CLAIR, AMBRE, ROUGE, VERT = "#4f8fd1", "#7fb2e5", "#e8a94b", "#e05252", "#5cb87a"
+# ── Entités réelles du projet ────────────────────────────────────────────
+# Le modèle d'Anima cite des identifiants indicatifs ; voici la
+# correspondance avec ceux que le babyphone publie réellement.
+NIVEAU = "sensor.babyphone_noise_level"
+PIC = "sensor.babyphone_pic_sonore"          # Anima : babyphone_peak
+FOND = "sensor.babyphone_fond_sonore"        # Anima : babyphone_noise_floor
+SEUIL = "sensor.babyphone_threshold"
+NATURE = "sensor.babyphone_nature_du_son"    # Anima : babyphone_detected_sound
+EN_LIGNE = "binary_sensor.babyphone_en_ligne"  # Anima : babyphone_telemetry_online
+UPTIME = "sensor.babyphone_duree_de_service"   # Anima : babyphone_service_uptime
+# Anima suppose un binary_sensor ; le nôtre est un sensor « Oui »/« Non ».
+SOUS_TENSION = "sensor.babyphone_sous_tension"
+EVEIL = "input_boolean.lenaic_speaking"
+ARMEE = "input_boolean.babyphone_on_off"
+ACTIVITE = "sensor.babyphone_activite"
+CENTROID = "sensor.babyphone_centre_spectral"
+CALME_DEPUIS = "sensor.babyphone_calme_depuis"
+REVEILS_NUIT = "sensor.babyphone_reveils_nuit"
+REVEILS_24H = "sensor.babyphone_reveils_24h"
+AGITATION_24H = "sensor.babyphone_agitation_24h"
+ENDORMI = "sensor.babyphone_heure_endormissement"
+SOMMEIL = "sensor.lenaic_night_asleep_duration"
+REDEMARRAGES = "counter.babyphone_demarrages"
 
-# `as_timestamp(state, 0)` rend 0 quand l'état est inconnu, ce qui affichait
-# « 01:00 » — l'epoch en heure locale. Il faut tester l'état AVANT de convertir.
-HEURE_ENDORMISSEMENT = (
-    "{% set s = states('sensor.babyphone_heure_endormissement') %}"
-    "{% if s not in ['unknown', 'unavailable', 'none', ''] %}"
-    "{{ as_timestamp(s) | timestamp_custom('%H:%M', true) }}"
-    "{% else %}—{% endif %}"
-)
+# ── Palette sémantique du modèle maison ──────────────────────────────────
+INFO, INFO_CLAIR = "#0ea5e9", "#38bdf8"
+CALME_V = "#22c55e"
+VOIX_V = "#f59e0b"
+PLEURS_V = "#f97316"
+CRI_V = "#ef4444"
 
-DERNIER_REVEIL = (
-    "{% set s = states('sensor.babyphone_dernier_reveil') %}"
-    "{% if s not in ['unknown', 'unavailable', 'none', ''] %}"
-    "{{ as_timestamp(s) | timestamp_custom('%H:%M', true) }}"
-    "{% else %}—{% endif %}"
-)
-
-
-# Cet interrupteur ARRÊTE le babyphone : une automatisation le suit et appelle
-# `systemctl stop` sur le Pi. Un appui accidentel — en faisant défiler la page
-# sur mobile — a déjà coupé la surveillance huit heures durant le 2026-08-15.
-# La confirmation est donc obligatoire, y compris pour armer : le geste doit
-# rester délibéré dans les deux sens.
-BASCULE_SURVEILLANCE = {
-    "action": "toggle",
-    "confirmation": {
-        "text": "Basculer la surveillance de la chambre de Lenaïc ?",
+# Ossature commune à tous les button-card du modèle : carte transparente,
+# grille à une seule zone, corps en pleine largeur.
+NU = {
+    "show_name": False,
+    "show_icon": False,
+    "show_state": False,
+    "styles": {
+        "card": [{"padding": "0"}, {"background": "transparent"},
+                 {"box-shadow": "none"}, {"border": "none"}, {"border-radius": "0"}],
+        "grid": [{"grid-template-areas": '"body"'}, {"grid-template-columns": "1fr"}],
+        "custom_fields": {"body": [{"width": "100%"}]},
     },
 }
 
+# Style d'une tuile, paramétré par sa couleur d'accent.
+TUILE_CSS = """
+  .bp-tile {{
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid {teinte}38;
+    border-radius: 14px;
+    background: {teinte}1a;
+    text-align: left;
+  }}
+  .bp-tile .k {{ font-size: 12px; font-weight: 760; color: var(--primary-text-color); }}
+  .bp-tile .v {{
+    overflow: hidden; margin-top: 4px; font-size: 18px; font-weight: 800;
+    color: {teinte}; text-overflow: ellipsis; white-space: nowrap;
+  }}
+  .bp-tile .m {{
+    overflow: hidden; margin-top: 2px; font-size: 10px;
+    color: var(--secondary-text-color); text-overflow: ellipsis;
+    text-transform: uppercase; white-space: nowrap;
+  }}
+"""
 
-def tuile(entity, primary, secondary, icon, color, tap=None):
-    """Tuile mushroom verticale — la brique de tous les bandeaux de chiffres."""
-    c = {
-        "type": "custom:mushroom-template-card",
+
+def tuile(entity, titre, legende, teinte, corps_js):
+    """Tuile acoustique : un vrai enfant du grid, avec sa propre cible tactile."""
+    return {
+        "type": "custom:button-card",
+        "name": f"Anima Babyphone - {titre.lower()}",
         "entity": entity,
-        "primary": primary,
-        "secondary": secondary,
-        "icon": icon,
-        "icon_color": color,
-        "layout": "vertical",
-        "fill_container": True,
+        **NU,
+        "tap_action": {"action": "more-info", "entity": entity},
+        "extra_styles": TUILE_CSS.format(teinte=teinte),
+        "custom_fields": {"body": f"""[[[
+          {corps_js}
+          return `<div class="bp-tile">
+            <div class="k">{titre}</div>
+            <div class="v"{{style}}>${{v}}</div>
+            <div class="m">{legende}</div>
+          </div>`;
+        ]]]""".replace("{style}", "")},
     }
-    if tap:
-        c["tap_action"] = tap
-    return c
 
 
-def titre(t, s=None):
-    c = {"type": "custom:mushroom-title-card", "title": t}
-    if s:
-        c["subtitle"] = s
-    return c
+def tuile_db(entity, titre, legende, teinte):
+    return tuile(entity, titre, legende, teinte,
+                 "const n = Number(entity?.state);"
+                 " const v = Number.isFinite(n) ? n.toFixed(1)+' dB' : '—';")
 
 
 # ══════════════════════════════════════════════════════════════════════
-# Sections de surveillance — en haut de page
+# BLOC 1 — Surveillance : hero, tuiles acoustiques, diagnostic
 # ══════════════════════════════════════════════════════════════════════
 
-ETAT_ACTUEL = {
-    "type": "grid",
+HERO_CSS = """
+  .bp-hero {
+    position: relative; overflow: hidden; padding: 16px; color: white;
+    background: linear-gradient(135deg,#111827 0%,#164e63 52%,#0f766e 100%);
+  }
+  .bp-hero.warn  { background: linear-gradient(135deg,#21170b 0%,#7c3f00 50%,#f08c00 100%); }
+  .bp-hero.alert { background: linear-gradient(135deg,#27131a 0%,#7f1d1d 50%,#dc2626 100%); }
+  .bp-hero:after {
+    content: ""; position: absolute; right: -42px; top: -55px;
+    width: 155px; height: 155px; border-radius: 50%; background: rgba(255,255,255,.12);
+  }
+  .bp-top { position: relative; z-index: 1; display: flex; align-items: center; gap: 12px; min-width: 0; }
+  .bp-icon {
+    flex: 0 0 44px; display: flex; align-items: center; justify-content: center;
+    width: 44px; height: 44px; border-radius: 16px;
+    background: rgba(255,255,255,.18); backdrop-filter: blur(8px);
+  }
+  .bp-icon ha-icon { --mdc-icon-size: 24px; color: white; }
+  .bp-title { flex: 1; min-width: 0; text-align: left; }
+  .bp-title .main { overflow: hidden; font-size: 17px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+  .bp-title .sub { overflow: hidden; margin-top: 2px; font-size: 12px; opacity: .78; text-overflow: ellipsis; white-space: nowrap; }
+  .bp-score { min-width: 78px; padding: 7px 10px; border-radius: 999px; background: rgba(255,255,255,.18); font-weight: 800; text-align: center; }
+  .bp-score .num { font-size: 21px; line-height: 21px; white-space: nowrap; }
+  .bp-score .lbl { font-size: 9px; letter-spacing: .08em; opacity: .72; text-transform: uppercase; }
+  .bp-stats { position: relative; z-index: 1; display: grid; grid-template-columns: repeat(3,1fr); gap: 8px; margin-top: 14px; }
+  .bp-stat { min-width: 0; padding: 9px 8px; border-radius: 14px; background: rgba(255,255,255,.13); text-align: left; }
+  .bp-stat .val { overflow: hidden; font-size: 15px; font-weight: 750; text-overflow: ellipsis; white-space: nowrap; }
+  .bp-stat .lbl { overflow: hidden; margin-top: 2px; font-size: 10px; letter-spacing: .06em; opacity: .72; text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+  @media (max-width:390px) {
+    .bp-score { min-width: 62px; }
+    .bp-title .main { font-size: 15px; }
+    .bp-stats { gap: 7px; }
+    .bp-stat .val { font-size: 13px; }
+  }
+"""
+
+HERO_JS = """[[[
+  const E = id => states[id] || {state:'unknown', attributes:{}};
+  const num = (id, unit='', d=0) => {
+    const n = Number(E(id).state);
+    return Number.isFinite(n) ? n.toFixed(d) + unit : '—';
+  };
+
+  const nature = String(E('%(NATURE)s').state || 'unknown').toLowerCase();
+  const online = E('%(EN_LIGNE)s').state === 'on';
+  const armee  = E('%(ARMEE)s').state === 'on';
+  const eveil  = E('%(EVEIL)s').state === 'on';
+  const sousTension = String(E('%(SOUS_TENSION)s').state) === 'Oui';
+
+  let cls = '', label = 'Tout est calme', icon = 'mdi:sleep';
+
+  if (nature.includes('cri')) {
+    cls = 'alert'; label = 'Cri détecté'; icon = 'mdi:alert-octagram';
+  } else if (nature.includes('pleur')) {
+    cls = 'warn'; label = 'Pleurs détectés'; icon = 'mdi:emoticon-cry-outline';
+  } else if (nature.includes('voix')) {
+    cls = 'warn'; label = 'Voix détectée'; icon = 'mdi:account-voice';
+  } else if (eveil) {
+    cls = 'warn'; label = 'Réveil en cours'; icon = 'mdi:emoticon-cry-outline';
+  } else if (!online) {
+    cls = 'alert'; label = 'Télémétrie hors ligne'; icon = 'mdi:access-point-off';
+  } else if (!armee) {
+    cls = 'warn'; label = 'Surveillance désarmée'; icon = 'mdi:shield-off-outline';
+  } else if (sousTension) {
+    cls = 'warn'; label = 'Alimentation insuffisante'; icon = 'mdi:flash-alert';
+  } else {
+    const calme = Number(E('%(CALME_DEPUIS)s').state);
+    if (Number.isFinite(calme)) label = `Calme depuis ${calme.toFixed(0)} min`;
+  }
+
+  return `<div class="bp-hero ${cls}">
+    <div class="bp-top">
+      <div class="bp-icon"><ha-icon icon="${icon}"></ha-icon></div>
+      <div class="bp-title">
+        <div class="main">Babyphone</div>
+        <div class="sub">${label}</div>
+      </div>
+      <div class="bp-score">
+        <div class="num">${online ? (armee ? 'ON' : 'VEILLE') : 'HS'}</div>
+        <div class="lbl">audio</div>
+      </div>
+    </div>
+    <div class="bp-stats">
+      <div class="bp-stat"><div class="val">${num('%(NIVEAU)s',' dB',1)}</div><div class="lbl">niveau</div></div>
+      <div class="bp-stat"><div class="val">${num('%(PIC)s',' dB',1)}</div><div class="lbl">pic</div></div>
+      <div class="bp-stat"><div class="val">${num('%(SEUIL)s',' dB',1)}</div><div class="lbl">seuil</div></div>
+    </div>
+  </div>`;
+]]]""" % {"NATURE": NATURE, "EN_LIGNE": EN_LIGNE, "ARMEE": ARMEE, "EVEIL": EVEIL,
+          "SOUS_TENSION": SOUS_TENSION, "CALME_DEPUIS": CALME_DEPUIS,
+          "NIVEAU": NIVEAU, "PIC": PIC, "SEUIL": SEUIL}
+
+DIAG_CSS = """
+  .bp-diag {
+    display:grid; grid-template-columns:34px minmax(0,1fr) auto;
+    align-items:center; gap:10px; padding:11px 14px;
+    border-top:1px solid var(--divider-color); text-align:left;
+  }
+  .bp-diag .i { display:flex; align-items:center; justify-content:center; width:34px; height:34px; border-radius:12px; background:rgba(14,165,233,.12); }
+  .bp-diag .i ha-icon { --mdc-icon-size:19px; color:#38bdf8; }
+  .bp-diag.warn .i { background:rgba(245,158,11,.16); }
+  .bp-diag.warn .i ha-icon { color:#f59e0b; }
+  .bp-diag .k { overflow:hidden; font-size:13px; font-weight:760; text-overflow:ellipsis; white-space:nowrap; }
+  .bp-diag .m { overflow:hidden; margin-top:2px; font-size:11px; color:var(--secondary-text-color); text-overflow:ellipsis; white-space:nowrap; }
+  .bp-pill { padding:5px 9px; border-radius:999px; background:#16a34a; color:white; font-size:11px; font-weight:800; white-space:nowrap; }
+  .bp-diag.warn .bp-pill { background:#f59e0b; }
+"""
+
+DIAG_JS = """[[[
+  const E = id => states[id] || {state:'unknown'};
+  const online = E('%(EN_LIGNE)s').state === 'on';
+  const sousTension = String(E('%(SOUS_TENSION)s').state) === 'Oui';
+  const boucles = Number(E('%(REDEMARRAGES)s').state) || 0;
+  const s = Number(E('%(UPTIME)s').state);
+  const uptime = Number.isFinite(s)
+    ? (s < 3600 ? `${(s/60).toFixed(0)} min` : `${(s/3600).toFixed(1)} h`)
+    : '—';
+
+  const warn = !online || sousTension || boucles >= 3;
+  const status = !online ? 'Hors ligne'
+    : (boucles >= 3 ? 'Redémarre' : (sousTension ? 'Sous-tension' : 'En ligne'));
+  const meta = !online ? 'La télémétrie ne répond plus'
+    : (boucles >= 3 ? `${boucles} redémarrages récents, dispositif peu fiable`
+    : (sousTension ? 'Alimentation insuffisante : bloc 5,1 V / 3 A requis'
+    : `Service actif depuis ${uptime}`));
+
+  return `<div class="bp-diag ${warn ? 'warn' : ''}">
+    <div class="i"><ha-icon icon="${warn ? 'mdi:alert-circle-outline' : 'mdi:heart-pulse'}"></ha-icon></div>
+    <div><div class="k">Diagnostic</div><div class="m">${meta}</div></div>
+    <div class="bp-pill">${status}</div>
+  </div>`;
+]]]""" % {"EN_LIGNE": EN_LIGNE, "SOUS_TENSION": SOUS_TENSION,
+          "REDEMARRAGES": REDEMARRAGES, "UPTIME": UPTIME}
+
+SURVEILLANCE = {
+    "type": "custom:stack-in-card",
+    "name": "Anima Babyphone - surveillance",
+    "mode": "vertical",
+    "keep": {"background": True, "border_radius": True, "box_shadow": True},
+    "grid_options": {"columns": "full"},
+    "card_mod": {"style": (
+        "ha-card {\n"
+        "  overflow: hidden;\n"
+        "  border-radius: 18px;\n"
+        "  border: 1px solid rgba(127,127,127,.14);\n"
+        "  box-shadow: 0 10px 30px rgba(0,0,0,.16);\n"
+        "}\n")},
     "cards": [
-        titre("👶 Maintenant", "Chambre de Lenaïc"),
         {
-            # La carte la plus importante de la page : grande, sans ambiguïté,
-            # et son icône dit l'essentiel avant même la lecture du texte.
-            "type": "custom:mushroom-template-card",
-            "entity": "input_boolean.lenaic_speaking",
-            "primary": (
-                "{{ 'Réveil en cours' if is_state('input_boolean.lenaic_speaking',"
-                " 'on') else 'Tout est calme' }}"
-            ),
-            "secondary": (
-                "{% if is_state('input_boolean.lenaic_speaking', 'on') %}"
-                "depuis {{ relative_time(states.input_boolean.lenaic_speaking.last_changed) }}"
-                "{% else %}"
-                "{{ states('sensor.babyphone_calme_depuis') | int(0) }} min de calme"
-                "{% endif %}"
-            ),
-            "icon": (
-                "{{ 'mdi:emoticon-cry-outline' if"
-                " is_state('input_boolean.lenaic_speaking', 'on') else 'mdi:sleep' }}"
-            ),
-            "icon_color": (
-                "{{ 'red' if is_state('input_boolean.lenaic_speaking', 'on')"
-                " else 'green' }}"
-            ),
-            "fill_container": True,
-            "multiline_secondary": True,
+            "type": "custom:button-card",
+            "name": "Anima Babyphone - header",
+            "entity": NIVEAU,
+            **NU,
+            # Toute entité lue dans le JS doit figurer ici, sinon la synthèse
+            # reste figée à l'écran (règle n°1 du modèle).
+            "triggers_update": [NIVEAU, PIC, SEUIL, NATURE, EN_LIGNE, ARMEE,
+                                EVEIL, SOUS_TENSION, CALME_DEPUIS],
+            "tap_action": {"action": "more-info", "entity": NATURE},
+            "hold_action": {"action": "more-info", "entity": NIVEAU},
+            "extra_styles": HERO_CSS,
+            "custom_fields": {"body": HERO_JS},
         },
         {
-            # Le niveau sonore des 30 dernières minutes, sans échelle ni
-            # légende : on cherche une forme, pas une valeur.
-            "type": "custom:mini-graph-card",
-            "entities": [{"entity": "sensor.babyphone_pic_sonore", "name": "Niveau"}],
-            "name": "Activité sonore récente",
-            "hours_to_show": 0.5,
-            "points_per_hour": 120,
-            "line_width": 2,
-            "line_color": BLEU,
-            "show": {"labels": False, "legend": False, "extrema": False, "name": True},
-        },
-        {
-            "type": "horizontal-stack",
+            "type": "grid",
+            "columns": 2,
+            "square": False,
+            "card_mod": {"style": (
+                "ha-card {\n"
+                "  display: grid;\n  gap: 8px;\n  padding: 11px 12px 0;\n"
+                "  border: none;\n  background: transparent;\n  box-shadow: none;\n"
+                "}\n")},
             "cards": [
-                tuile(
-                    "binary_sensor.babyphone_en_ligne",
-                    "{{ 'Actif' if is_state('binary_sensor.babyphone_en_ligne', 'on')"
-                    " else 'HORS LIGNE' }}",
-                    "Dispositif",
-                    "{{ 'mdi:access-point-check' if"
-                    " is_state('binary_sensor.babyphone_en_ligne', 'on')"
-                    " else 'mdi:access-point-off' }}",
-                    "{{ 'green' if is_state('binary_sensor.babyphone_en_ligne', 'on')"
-                    " else 'red' }}",
-                ),
-                tuile(
-                    "input_boolean.babyphone_on_off",
-                    "{{ 'Armée' if is_state('input_boolean.babyphone_on_off', 'on')"
-                    " else 'Éteinte' }}",
-                    "Surveillance",
-                    "mdi:shield-home",
-                    "{{ 'amber' if is_state('input_boolean.babyphone_on_off', 'on')"
-                    " else 'disabled' }}",
-                    BASCULE_SURVEILLANCE,
-                ),
-                tuile(
-                    "sensor.babyphone_dernier_reveil",
-                    DERNIER_REVEIL,
-                    "Dernier réveil",
-                    "mdi:clock-alert-outline",
-                    "blue",
-                ),
+                tuile_db(NIVEAU, "Niveau sonore", "moyenne de la dernière seconde", INFO_CLAIR),
+                tuile_db(PIC, "Pic récent", "bloc le plus fort vu par le détecteur", VOIX_V),
+                tuile_db(FOND, "Fond sonore", "référence ambiante de la pièce", CALME_V),
+                tuile(NATURE, "Son détecté", "signature spectrale", INFO_CLAIR,
+                      "const raw = String(entity?.state || 'unknown').toLowerCase();"
+                      " const v = ['unknown','unavailable'].includes(raw) ? '—' : raw;"),
             ],
+        },
+        {
+            "type": "custom:button-card",
+            "name": "Anima Babyphone - diagnostic",
+            "entity": EN_LIGNE,
+            **NU,
+            "triggers_update": [EN_LIGNE, UPTIME, SOUS_TENSION, REDEMARRAGES],
+            "tap_action": {"action": "more-info", "entity": EN_LIGNE},
+            "hold_action": {"action": "more-info", "entity": SOUS_TENSION},
+            "extra_styles": DIAG_CSS,
+            "custom_fields": {"body": DIAG_JS},
         },
     ],
 }
 
+# ══════════════════════════════════════════════════════════════════════
+# BLOC 2 — La nuit : chiffres puis hypnogramme, en vraies cartes
+# ══════════════════════════════════════════════════════════════════════
+
+NUIT_JS = """[[[
+  const E = id => states[id] || {state:'unknown'};
+  const heure = s => {
+    const t = E(s).state;
+    if (['unknown','unavailable','none',''].includes(t)) return '—';
+    const d = new Date(t);
+    return isNaN(d) ? '—' : d.toLocaleTimeString('fr-FR',{hour:'2-digit',minute:'2-digit'});
+  };
+  const n = (id,d=0) => { const v = Number(E(id).state); return Number.isFinite(v) ? v.toFixed(d) : '—'; };
+  const reveils = Number(E('%(REVEILS_NUIT)s').state) || 0;
+  const teinte = reveils < 3 ? '#22c55e' : (reveils < 8 ? '#f59e0b' : '#ef4444');
+
+  return `<div class="bp-night">
+    <div class="bp-ncell"><div class="nv">${heure('%(ENDORMI)s')}</div><div class="nl">endormi à</div></div>
+    <div class="bp-ncell"><div class="nv" style="color:${teinte}">${reveils}</div><div class="nl">réveils</div></div>
+    <div class="bp-ncell"><div class="nv">${n('%(SOMMEIL)s',1)} h</div><div class="nl">sommeil</div></div>
+    <div class="bp-ncell"><div class="nv">${n('%(CALME_DEPUIS)s')} min</div><div class="nl">calme depuis</div></div>
+  </div>`;
+]]]""" % {"REVEILS_NUIT": REVEILS_NUIT, "ENDORMI": ENDORMI,
+          "SOMMEIL": SOMMEIL, "CALME_DEPUIS": CALME_DEPUIS}
+
 NUIT = {
-    "type": "grid",
+    "type": "custom:stack-in-card",
+    "name": "Anima Babyphone - nuit",
+    "mode": "vertical",
+    "keep": {"background": True, "border_radius": True, "box_shadow": True},
+    "grid_options": {"columns": "full"},
+    "card_mod": {"style": (
+        "ha-card {\n  overflow: hidden;\n  border-radius: 18px;\n"
+        "  border: 1px solid rgba(127,127,127,.14);\n"
+        "  box-shadow: 0 10px 30px rgba(0,0,0,.16);\n}\n")},
     "cards": [
-        titre("🌙 Cette nuit", "Depuis 20 h"),
         {
-            "type": "horizontal-stack",
-            "cards": [
-                tuile("sensor.babyphone_heure_endormissement", HEURE_ENDORMISSEMENT,
-                      "Endormi à", "mdi:weather-night", "indigo"),
-                tuile("sensor.babyphone_reveils_nuit",
-                      "{{ states('sensor.babyphone_reveils_nuit') | int(0) }}",
-                      "Réveils", "mdi:emoticon-cry-outline",
-                      "{{ 'green' if states('sensor.babyphone_reveils_nuit') | int(0) < 3"
-                      " else ('orange' if states('sensor.babyphone_reveils_nuit') | int(0)"
-                      " < 8 else 'red') }}"),
-                tuile("sensor.lenaic_night_asleep_duration",
-                      "{{ states('sensor.lenaic_night_asleep_duration') | float(0) | round(1) }} h",
-                      "Sommeil", "mdi:sleep", "blue"),
-            ],
+            "type": "custom:button-card",
+            "name": "Anima Babyphone - nuit chiffres",
+            "entity": REVEILS_NUIT,
+            **NU,
+            "triggers_update": [REVEILS_NUIT, ENDORMI, SOMMEIL, CALME_DEPUIS],
+            "tap_action": {"action": "more-info", "entity": REVEILS_NUIT},
+            "extra_styles": """
+              .bp-night {
+                display: grid; grid-template-columns: repeat(4,1fr); gap: 8px;
+                padding: 14px 14px 4px;
+              }
+              .bp-ncell { min-width: 0; padding: 9px 8px; border-radius: 14px; background: rgba(127,127,127,.075); text-align: left; }
+              .bp-ncell .nv { overflow: hidden; font-size: 16px; font-weight: 800; text-overflow: ellipsis; white-space: nowrap; }
+              .bp-ncell .nl { overflow: hidden; margin-top: 2px; font-size: 10px; letter-spacing: .06em; color: var(--secondary-text-color); text-overflow: ellipsis; text-transform: uppercase; white-space: nowrap; }
+              @media (max-width:390px) { .bp-night { grid-template-columns: repeat(2,1fr); } }
+            """,
+            "custom_fields": {"body": NUIT_JS},
         },
         {
-            # Hypnogramme : chaque barre est un éveil. Le trait doit être
-            # visible — avec une épaisseur nulle, une aire à 0 est invisible
-            # et le graphe paraissait vide alors que les données existaient.
+            # Vraie carte : on ne simule pas un graphe en HTML (règle n°2).
             "type": "custom:apexcharts-card",
             "header": {"show": True, "title": "Éveils de la nuit", "show_states": False},
             "graph_span": "14h",
@@ -207,206 +390,102 @@ NUIT = {
                 "legend": {"show": False},
                 "yaxis": {"show": False, "min": 0, "max": 1},
             },
+            "series": [{
+                "entity": EVEIL, "name": "Éveil", "type": "area", "color": CRI_V,
+                "transform": "return x === 'on' ? 1 : 0;", "extend_to": "now",
+                "group_by": {"func": "max", "duration": "1min"},
+            }],
+            "card_mod": {"style": (
+                "ha-card {\n  margin: 0;\n  padding: 0 8px 8px;\n"
+                "  border: none;\n  background: transparent;\n  box-shadow: none;\n}\n")},
+        },
+    ],
+}
+
+# ══════════════════════════════════════════════════════════════════════
+# BLOC 3 — Télémétrie et tendances
+# ══════════════════════════════════════════════════════════════════════
+
+TELEMETRIE = {
+    "type": "custom:stack-in-card",
+    "name": "Anima Babyphone - telemetrie",
+    "mode": "vertical",
+    "keep": {"background": True, "border_radius": True, "box_shadow": True},
+    "grid_options": {"columns": "full"},
+    "card_mod": {"style": (
+        "ha-card {\n  overflow: hidden;\n  border-radius: 18px;\n"
+        "  border: 1px solid rgba(127,127,127,.14);\n"
+        "  box-shadow: 0 10px 30px rgba(0,0,0,.16);\n}\n")},
+    "cards": [
+        {
+            "type": "custom:apexcharts-card",
+            "header": {"show": True, "title": "Niveau, pic et seuil — 2 h",
+                       "show_states": True, "colorize_states": True},
+            "graph_span": "2h",
+            "apex_config": {"chart": {"height": 210},
+                            "stroke": {"width": [1, 2, 2]},
+                            "legend": {"show": True}},
+            "yaxis": [{"decimals": 0}],
             "series": [
-                {
-                    "entity": "input_boolean.lenaic_speaking",
-                    "name": "Éveil",
-                    "type": "area",
-                    "color": ROUGE,
-                    "transform": "return x === 'on' ? 1 : 0;",
-                    "extend_to": "now",
-                    "group_by": {"func": "max", "duration": "1min"},
-                }
+                {"entity": PIC, "name": "Pic", "type": "area", "color": INFO_CLAIR,
+                 "opacity": 0.2, "group_by": {"func": "max", "duration": "30s"}},
+                {"entity": NIVEAU, "name": "Moyenne", "color": INFO,
+                 "group_by": {"func": "avg", "duration": "30s"}},
+                {"entity": SEUIL, "name": "Seuil", "color": VOIX_V,
+                 "group_by": {"func": "avg", "duration": "30s"}},
+            ],
+            "card_mod": {"style": (
+                "ha-card {\n  margin: 0;\n  padding: 4px 8px 0;\n"
+                "  border: none;\n  background: transparent;\n  box-shadow: none;\n}\n")},
+        },
+        {
+            "type": "grid",
+            "columns": 2,
+            "square": False,
+            "card_mod": {"style": (
+                "ha-card {\n  display: grid;\n  gap: 8px;\n  padding: 8px 12px 12px;\n"
+                "  border: none;\n  background: transparent;\n  box-shadow: none;\n}\n")},
+            "cards": [
+                tuile(ACTIVITE, "Blocs bruyants", "part au-dessus du seuil", INFO_CLAIR,
+                      "const n = Number(entity?.state);"
+                      " const v = Number.isFinite(n) ? n.toFixed(0)+' %' : '—';"),
+                tuile(CENTROID, "Centre spectral", "aigu = plutôt un pleur", PLEURS_V,
+                      "const n = Number(entity?.state);"
+                      " const v = Number.isFinite(n) ? n.toFixed(0)+' Hz' : '—';"),
             ],
         },
     ],
 }
 
 TENDANCES = {
-    "type": "grid",
+    "type": "custom:stack-in-card",
+    "name": "Anima Babyphone - tendances",
+    "mode": "vertical",
+    "keep": {"background": True, "border_radius": True, "box_shadow": True},
+    "grid_options": {"columns": "full"},
+    "card_mod": {"style": (
+        "ha-card {\n  overflow: hidden;\n  border-radius: 18px;\n"
+        "  border: 1px solid rgba(127,127,127,.14);\n"
+        "  box-shadow: 0 10px 30px rgba(0,0,0,.16);\n}\n")},
     "cards": [
-        titre("📈 Tendances", "Une nuit isolée ne dit rien, une tendance si"),
         {
             "type": "custom:apexcharts-card",
-            "header": {"show": True, "title": "Réveils par jour", "show_states": False},
+            "header": {"show": True, "title": "Sept derniers jours", "show_states": False},
             "graph_span": "7d",
             "span": {"start": "day"},
-            "apex_config": {"chart": {"height": 180}, "legend": {"show": False}},
+            "apex_config": {"chart": {"height": 190}, "legend": {"show": True}},
             "series": [
-                {
-                    "entity": "sensor.babyphone_reveils_24h",
-                    "name": "Réveils",
-                    "type": "column",
-                    "color": AMBRE,
-                    "group_by": {"func": "max", "duration": "1d"},
-                }
+                {"entity": REVEILS_24H, "name": "Réveils", "type": "column",
+                 "color": VOIX_V, "group_by": {"func": "max", "duration": "1d"}},
+                {"entity": AGITATION_24H, "name": "Agitation (h)", "type": "column",
+                 "color": INFO, "group_by": {"func": "max", "duration": "1d"}},
             ],
-        },
-        {
-            "type": "custom:apexcharts-card",
-            "header": {"show": True, "title": "Agitation cumulée par jour",
-                       "show_states": False},
-            "graph_span": "7d",
-            "span": {"start": "day"},
-            "apex_config": {"chart": {"height": 180}, "legend": {"show": False}},
-            "yaxis": [{"decimals": 1}],
-            "series": [
-                {
-                    "entity": "sensor.babyphone_agitation_24h",
-                    "name": "Heures",
-                    "type": "column",
-                    "color": BLEU,
-                    "group_by": {"func": "max", "duration": "1d"},
-                }
-            ],
+            "card_mod": {"style": (
+                "ha-card {\n  margin: 0;\n  padding: 4px 8px 8px;\n"
+                "  border: none;\n  background: transparent;\n  box-shadow: none;\n}\n")},
         },
     ],
 }
-
-
-# ══════════════════════════════════════════════════════════════════════
-# Sections techniques — plus bas sur la même page
-# ══════════════════════════════════════════════════════════════════════
-
-SANTE = {
-    "type": "grid",
-    "cards": [
-        titre("🩺 Santé du dispositif", "Raspberry Pi · babyphone.local"),
-        {
-            "type": "horizontal-stack",
-            "cards": [
-                tuile("binary_sensor.babyphone_en_ligne",
-                      "{{ 'En ligne' if is_state('binary_sensor.babyphone_en_ligne', 'on')"
-                      " else 'HORS LIGNE' }}",
-                      "Télémétrie",
-                      "{{ 'mdi:access-point-check' if"
-                      " is_state('binary_sensor.babyphone_en_ligne', 'on')"
-                      " else 'mdi:access-point-off' }}",
-                      "{{ 'green' if is_state('binary_sensor.babyphone_en_ligne', 'on')"
-                      " else 'red' }}"),
-                tuile("sensor.babyphone_duree_de_service",
-                      "{% set s = states('sensor.babyphone_duree_de_service') | float(0) %}"
-                      "{% if s < 3600 %}{{ (s / 60) | round(0) }} min"
-                      "{% else %}{{ (s / 3600) | round(1) }} h{% endif %}",
-                      "Sans redémarrage", "mdi:restart",
-                      "{{ 'red' if states('counter.babyphone_demarrages') | int(0) >= 3"
-                      " else 'grey' }}"),
-                tuile("sensor.babyphone_sous_tension",
-                      "{{ states('sensor.babyphone_sous_tension') }}",
-                      "Sous-tension", "mdi:flash-alert",
-                      "{{ 'red' if is_state('sensor.babyphone_sous_tension', 'Oui')"
-                      " else 'green' }}"),
-            ],
-        },
-        {
-            # Ce bandeau n'apparaît que lorsqu'il a quelque chose à dire.
-            "type": "conditional",
-            "conditions": [{"condition": "state",
-                            "entity": "sensor.babyphone_sous_tension", "state": "Oui"}],
-            "card": {
-                "type": "markdown",
-                "content": (
-                    "### ⚡ Alimentation insuffisante\n"
-                    "Le Pi signale une sous-tension. C'est la cause connue des "
-                    "coupures du micro — aucun réglage logiciel ne la compense.\n\n"
-                    "**Remède** : bloc officiel 5,1 V / 3 A et câble court."
-                ),
-            },
-        },
-        {
-            "type": "horizontal-stack",
-            "cards": [
-                tuile("counter.babyphone_demarrages",
-                      "{{ states('counter.babyphone_demarrages') | int(0) }}",
-                      "Redémarrages", "mdi:restart-alert",
-                      "{{ 'red' if states('counter.babyphone_demarrages') | int(0) >= 3"
-                      " else 'grey' }}"),
-                tuile("input_boolean.babyphone_on_off",
-                      "{{ 'Armée' if is_state('input_boolean.babyphone_on_off', 'on')"
-                      " else 'Éteinte' }}",
-                      "Surveillance", "mdi:shield-home",
-                      "{{ 'amber' if is_state('input_boolean.babyphone_on_off', 'on')"
-                      " else 'disabled' }}",
-                      BASCULE_SURVEILLANCE),
-                tuile("input_boolean.babyphone_alerte_acquittee",
-                      "{{ 'Acquittée' if"
-                      " is_state('input_boolean.babyphone_alerte_acquittee', 'on')"
-                      " else 'Armée' }}",
-                      "Alerte", "mdi:bell-check",
-                      "{{ 'orange' if"
-                      " is_state('input_boolean.babyphone_alerte_acquittee', 'on')"
-                      " else 'green' }}"),
-            ],
-        },
-    ],
-}
-
-TELEMETRIE = {
-    "type": "grid",
-    "cards": [
-        titre("📡 Télémétrie", "Bande vocale 300–4000 Hz, en dBFS"),
-        {
-            "type": "horizontal-stack",
-            "cards": [
-                tuile("sensor.babyphone_pic_sonore",
-                      "{{ states('sensor.babyphone_pic_sonore') | float(0) | round(0) }}",
-                      "Pic (dB)", "mdi:waveform", "light-blue"),
-                tuile("sensor.babyphone_noise_level",
-                      "{{ states('sensor.babyphone_noise_level') | float(0) | round(0) }}",
-                      "Moyenne (dB)", "mdi:volume-medium", "blue"),
-                tuile("sensor.babyphone_threshold",
-                      "{{ states('sensor.babyphone_threshold') | float(0) | round(0) }}",
-                      "Seuil (dB)", "mdi:arrow-collapse-horizontal", "amber"),
-                tuile("sensor.babyphone_activite",
-                      "{{ states('sensor.babyphone_activite') | int(0) }} %",
-                      "Blocs bruyants", "mdi:chart-bar", "purple"),
-            ],
-        },
-        {
-            # C'est le PIC qui est comparé au seuil, pas la moyenne : tracer
-            # les deux rend une décision d'éveil lisible sur la courbe.
-            "type": "custom:apexcharts-card",
-            "header": {"show": True, "title": "Niveau sonore et seuil (2 h)",
-                       "show_states": True, "colorize_states": True},
-            "graph_span": "2h",
-            "apex_config": {
-                "chart": {"height": 220},
-                "stroke": {"width": [1, 2, 2]},
-                "legend": {"show": True},
-            },
-            "yaxis": [{"decimals": 0}],
-            "series": [
-                {"entity": "sensor.babyphone_pic_sonore", "name": "Pic", "type": "area",
-                 "color": BLEU_CLAIR, "opacity": 0.2,
-                 "group_by": {"func": "max", "duration": "30s"}},
-                {"entity": "sensor.babyphone_noise_level", "name": "Moyenne",
-                 "color": BLEU, "group_by": {"func": "avg", "duration": "30s"}},
-                {"entity": "sensor.babyphone_threshold", "name": "Seuil", "color": AMBRE,
-                 "group_by": {"func": "avg", "duration": "30s"}},
-            ],
-        },
-        {
-            "type": "custom:apexcharts-card",
-            "header": {"show": True, "title": "Disponibilité de la télémétrie (24 h)",
-                       "show_states": False},
-            "graph_span": "24h",
-            "apex_config": {
-                "chart": {"height": 110},
-                "stroke": {"curve": "stepline", "width": 2},
-                "fill": {"type": "solid", "opacity": 0.4},
-                "legend": {"show": False},
-                "yaxis": {"show": False, "min": 0, "max": 1},
-            },
-            "series": [
-                {"entity": "binary_sensor.babyphone_en_ligne", "name": "En ligne",
-                 "type": "area", "color": VERT,
-                 "transform": "return x === 'on' ? 1 : 0;", "extend_to": "now",
-                 "group_by": {"func": "min", "duration": "5min"}},
-            ],
-        },
-    ],
-}
-
 
 VUE = {
     "theme": "Backend-selected",
@@ -416,18 +495,23 @@ VUE = {
     "type": "sections",
     "max_columns": 2,
     "badges": [
-        {"type": "entity", "show_name": False, "show_state": True, "show_icon": True,
-         "entity": "binary_sensor.babyphone_en_ligne"},
-        {"type": "entity", "show_name": False, "show_state": True, "show_icon": True,
-         "entity": "input_boolean.lenaic_speaking"},
+        {"type": "entity", "show_name": False, "show_state": True,
+         "show_icon": True, "entity": EN_LIGNE},
+        {"type": "entity", "show_name": False, "show_state": True,
+         "show_icon": True, "entity": EVEIL},
     ],
     "cards": [],
-    "sections": [ETAT_ACTUEL, NUIT, TENDANCES, SANTE, TELEMETRIE],
+    "sections": [
+        {"type": "grid", "cards": [SURVEILLANCE]},
+        {"type": "grid", "cards": [NUIT]},
+        {"type": "grid", "cards": [TELEMETRIE]},
+        {"type": "grid", "cards": [TENDANCES]},
+    ],
 }
 
 
 class Websocket:
-    """Client websocket minimal, suffisant pour dialoguer avec Home Assistant."""
+    """Client websocket minimal, sur la bibliothèque standard."""
 
     def __init__(self, host, port, path):
         self.sock = socket.create_connection((host, port), timeout=30)
@@ -443,7 +527,7 @@ class Websocket:
         head = b""
         while b"\r\n\r\n" not in head:
             head += self.sock.recv(1)
-        assert expected in head.decode(errors="ignore"), "poignée de main websocket refusée"
+        assert expected in head.decode(errors="ignore"), "poignée de main refusée"
         self._buf = b""
 
     def _recv_exact(self, n):
@@ -457,16 +541,15 @@ class Websocket:
 
     def send(self, obj):
         data = json.dumps(obj).encode()
-        header = bytearray([0x81])  # FIN + texte
+        header = bytearray([0x81])
         n = len(data)
-        mask_bit = 0x80  # tout message client DOIT être masqué
         if n < 126:
-            header.append(mask_bit | n)
+            header.append(0x80 | n)
         elif n < 65536:
-            header.append(mask_bit | 126)
+            header.append(0x80 | 126)
             header += struct.pack(">H", n)
         else:
-            header.append(mask_bit | 127)
+            header.append(0x80 | 127)
             header += struct.pack(">Q", n)
         mask = os.urandom(4)
         header += mask
@@ -482,7 +565,7 @@ class Websocket:
             elif n == 127:
                 n = struct.unpack(">Q", self._recv_exact(8))[0]
             payload += self._recv_exact(n)
-            if b0 & 0x80:  # FIN
+            if b0 & 0x80:
                 return json.loads(payload)
 
     def close(self):
@@ -493,9 +576,8 @@ class Websocket:
 
 
 def main():
-    """Publie la vue par l'API, sans toucher au disque ni redémarrer HA."""
     ws = Websocket(WS_HOST, WS_PORT, WS_PATH)
-    ws.recv()  # auth_required
+    ws.recv()
     ws.send({"type": "auth", "access_token": os.environ["SUPERVISOR_TOKEN"]})
     if ws.recv().get("type") != "auth_ok":
         raise SystemExit("  authentification websocket refusée")
@@ -504,14 +586,17 @@ def main():
     r = ws.recv()
     assert r.get("success"), r
     config = r["result"]
+
+    # Sauvegarde avant écriture (règle n°4 du modèle maison).
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    stamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    chemin = f"{BACKUP_DIR}/lovelace-mobile-{stamp}.json"
+    with open(chemin, "w") as f:
+        json.dump(config, f, indent=2, ensure_ascii=False)
+    print(f"  sauvegarde : {chemin}")
+
     views = config["views"]
-
-    # la sous-vue système a été fusionnée : on la retire si elle traîne encore
-    avant = len(views)
     views[:] = [v for v in views if v.get("path") != "babyphone-systeme"]
-    if len(views) != avant:
-        print("  ancienne sous-vue « babyphone-systeme » retirée")
-
     for i, v in enumerate(views):
         if v.get("path") == VUE["path"]:
             views[i] = VUE
@@ -529,7 +614,7 @@ def main():
     ws.close()
     if not r.get("success"):
         raise SystemExit(f"  échec de la publication : {r}")
-    print("  vue publiée par l'API (prise en compte immédiate, sans redémarrage)")
+    print("  vue publiée par l'API (effet immédiat, sans redémarrage)")
     return 0
 
 
